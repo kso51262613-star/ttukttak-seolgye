@@ -86,7 +86,10 @@ function shippingNote(cut) {
     const m = MATERIALS[k];
     return m && (m.kind === 'sheet' || (isLinear(k) && m.stock >= 6000));
   });
-  return heavy ? '<p class="note ship">6m 철재나 통 판재는 인터넷으로 주문하면 택배가 안 돼서 화물 운임(약 8만~10만 원)이 따로 들 수 있어요. 동네 철물점·목재소에서 잘라서 사면 더 쌀 수 있어요.</p>' : '';
+  const masonry = Object.keys(cut?.stock || {}).some(k => MATERIALS[k]?.group === 'masonry');
+  let html = heavy ? '<p class="note ship">6m 철재나 통 판재는 인터넷으로 주문하면 택배가 안 돼서 화물 운임(약 8만~10만 원)이 따로 들 수 있어요. 동네 철물점·목재소에서 잘라서 사면 더 쌀 수 있어요.</p>' : '';
+  if (masonry) html += '<p class="note ship">벽돌·레미탈처럼 무거운 자재는 택배로 사면 배송비 때문에 동네 건재상보다 3~5배 비싸요. 가까운 건재상에서 사세요. 적벽돌은 불이 닿는 안쪽에 쓰면 안 돼요(내화벽돌만).</p>';
+  return html;
 }
 
 function bomTab(ctx) {
@@ -104,7 +107,8 @@ function bomTab(ctx) {
       ${checkList('안전장비', bom.safety, checked, false)}
     </div>
     <div class="total">예상 재료비 합계 <b>${won(bom.total)}</b> <small>(자재를 통째로 살 때, 운송비·재단비 별도)</small>
-      <div class="used">쓴 만큼만 따지면 약 <b>${won(bom.usedTotal)}</b> <small>(남는 자투리를 다음 작품에 쓸 때)</small></div></div>${shippingNote(ctx.cut)}${NOTE}`;
+      <div class="used">쓴 만큼만 따지면 약 <b>${won(bom.usedTotal)}</b> <small>(남는 자투리를 다음 작품에 쓸 때)</small></div>
+      ${bom.weight >= 1 ? `<div class="used">예상 무게 약 <b>${Math.round(bom.weight).toLocaleString('ko-KR')}kg</b> <small>(참고값${bom.weight > 100 ? ', 혼자 들 수 없는 무게예요' : ''})</small></div>` : ''}</div>${shippingNote(ctx.cut)}${NOTE}`;
 }
 
 function stepsTab(ctx) {

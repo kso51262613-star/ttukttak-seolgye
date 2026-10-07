@@ -4,7 +4,8 @@ import { clampParams } from './model.js';
 import { usageOf } from './cutlist.js';
 import { WOOD_TOOLS } from './templates/wood.js';
 import { METAL_TOOLS, METAL_SAFETY } from './templates/metal.js';
-import { SAFETY_BASE } from './templates/helpers.js';
+import { SAFETY_BASE, MASONRY_TOOLS, MASONRY_SAFETY } from './templates/helpers.js';
+import { estimateWeight } from './measure.js';
 
 const area = p => 2 * (p.size[0] * p.size[1] + p.size[1] * p.size[2] + p.size[0] * p.size[2]) / 1e6;
 
@@ -29,11 +30,21 @@ export function buildBom(design, parts, cut, template, priceOverrides = {}) {
   const groups = new Set(parts.map(p => MATERIALS[p.material]?.group));
   const hasWood = groups.has('wood');
   const hasMetal = groups.has('metal');
+  const hasMasonry = groups.has('masonry');
 
   // 자재 (원장 수량)
   const materials = Object.entries(cut.stock).map(([key, s]) => ({
     id: `mat:${key}`, name: s.name, qty: s.qty, unit: s.unit, price: s.price, cost: s.cost
   }));
+  // 벽돌 몰탈: 벽돌 종류마다 정해진 장 수당 1포
+  let mortarCost = 0;
+  for (const [key, s] of Object.entries(cut.stock)) {
+    const mortar = MATERIALS[key]?.mortar;
+    if (!mortar) continue;
+    const qty = Math.ceil(s.qty / mortar.per);
+    mortarCost += qty * mortar.price;
+    materials.push({ id: `mortar:${key}`, name: mortar.name, qty, unit: '포', price: mortar.price, cost: qty * mortar.price });
+  }
 
   // 부속
   let hw = [];
@@ -46,6 +57,7 @@ export function buildBom(design, parts, cut, template, priceOverrides = {}) {
   const extras = parts.filter(p => p.extra || !template || template.id === 'custom');
   const extraWood = extras.filter(p => MATERIALS[p.material]?.group === 'wood').length;
   const extraMetal = extras.filter(p => MATERIALS[p.material]?.group === 'metal').length;
+  const extraMasonry = extras.filter(p => MATERIALS[p.material]?.group === 'masonry').length;
   if (extraWood) hw.push({ name: '목공 피스 65mm', qty: extraWood * 4, unit: '개', price: 15 });
   if (extraMetal && !hw.some(h => h.name.startsWith('용접봉'))) hw.push({ name: '용접봉 2.6mm', qty: 1, unit: '봉지(1kg)', price: 8000 });
   const hardware = priced('hw', mergeByName(hw));
@@ -53,7 +65,11 @@ export function buildBom(design, parts, cut, template, priceOverrides = {}) {
   // 마감재
   const finish = [];
   const woodArea = parts.filter(p => MATERIALS[p.material]?.group === 'wood').reduce((s, p) => s + area(p), 0);
-  const metalArea = parts.filter(p => MATERIALS[p.material]?.group === 'metal').reduce((s, p) => s + area(p), 0);
+  // 칠할 수 있는 철만: 완제품(바퀴 등), 스테인리스(paint: false), 콘크리트 속·밑 부품(noPaint)은 뺀다
+  const metalArea = parts.filter(p => {
+    const m = MATERIALS[p.material];
+    return m?.group === 'metal' && m.kind !== 'item' && m.paint !== false && !p.noPaint;
+  }).reduce((s, p) => s + area(p), 0);
   if (hasWood) {
     finish.push({ name: '오일스테인 또는 수성 바니쉬', qty: Math.max(1, Math.ceil(woodArea * 2 / 10)), unit: 'L', price: 6000 });
     finish.push({ name: '사포 세트(120·220방)', qty: 1, unit: '세트', price: 3000 });
@@ -71,8 +87,10 @@ export function buildBom(design, parts, cut, template, priceOverrides = {}) {
   const toolNames = new Set(template?.tools || []);
   if (hasWood && (!template || template.id === 'custom' || extraWood)) WOOD_TOOLS.forEach(t => toolNames.add(t));
   if (hasMetal && (!template || template.id === 'custom' || extraMetal)) METAL_TOOLS.forEach(t => toolNames.add(t));
+  if (hasMasonry && (!template || template.id === 'custom' || extraMasonry)) MASONRY_TOOLS.forEach(t => toolNames.add(t));
   const safetyNames = new Set([...SAFETY_BASE, ...(template?.safety || [])]);
   if (hasMetal) METAL_SAFETY.forEach(s => safetyNames.add(s));
+  if (hasMasonry) MASONRY_SAFETY.forEach(s => safetyNames.add(s));
 
   const tools = [...toolNames].map(name => ({ id: `tool:${name}`, name }));
   const safety = [...safetyNames].map(name => ({ id: `safe:${name}`, name }));
@@ -82,6 +100,7 @@ export function buildBom(design, parts, cut, template, priceOverrides = {}) {
   const total = materialCost + extraCost;
   // 남는 자투리를 다음 작품에 쓴다고 보면, 실제로 쓴 만큼의 자재값
   const usedMaterialCost = Math.round(Object.entries(cut.stock).reduce((s, [key, st]) => s + st.cost * Math.min(1, usageOf(cut, key)), 0));
-  const usedTotal = usedMaterialCost + extraCost;
-  return { materials, hardware, finish: finishItems, tools, safety, materialCost, total, usedTotal, woodArea, metalArea };
+  const usedTotal = usedMaterialCost + mortarCost + extraCost;
+  const weight = estimateWeight(parts);
+  return { materials, hardware, finish: finishItems, tools, safety, materialCost, total, usedTotal, woodArea, metalArea, weight };
 }

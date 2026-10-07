@@ -37,7 +37,7 @@ function compute() {
   const steps = buildSteps(design, template);
   const suggested = suggestPrice(bom.total, design.laborHours, design.hourlyRate);
   const price = design.price ?? suggested;
-  const listing = buildListing({ design, template, parts, bom, price });
+  const listing = buildListing({ design, template, parts, bom, price, weight: bom.weight });
   derived = { template, parts, cut, bom, steps, suggested, listing, market: MARKET_PRICES[design.templateId], marketNote: MARKET_NOTES[design.templateId] };
   if (selectedId && !parts.some(p => p.id === selectedId)) selectedId = null;
 }
@@ -136,6 +136,8 @@ function switchDesign(next, { refit = true } = {}) {
 
 // ---------- 부품 조작 ----------
 const findExtra = id => design.extraParts.find(p => p.id === id);
+// 돌리면 모양 약속이 깨지는 부품
+const FIXED_SHAPES = new Set(['barrel', 'wheel', 'caster', 'cylinder']);
 function moveBy(id, delta) {
   const ep = findExtra(id);
   if (ep) { ep.pos = ep.pos.map((v, i) => v + delta[i]); return; }
@@ -373,6 +375,7 @@ document.addEventListener('click', async e => {
     case 'rotate': {
       const ep = findExtra(selectedId);
       if (!ep) break;
+      if (FIXED_SHAPES.has(ep.shape)) { toast('아치·바퀴·원기둥 부품은 돌릴 수 없어요. 크기와 위치만 바꿀 수 있어요.'); break; }
       mutate(() => {
         const old = [...ep.size];
         if (t.dataset.axis === 'y') [ep.size[0], ep.size[2]] = [ep.size[2], ep.size[0]];
@@ -477,7 +480,16 @@ document.addEventListener('change', e => {
     }
     case 'part-size': {
       const ep = findExtra(selectedId);
-      if (ep) mutate(() => { const old = [...ep.size]; ep.size[i] = Math.max(1, Number(t.value) || 1); keepBottom(ep, old); });
+      if (ep) mutate(() => {
+        const old = [...ep.size];
+        const v = Math.max(1, Number(t.value) || 1);
+        ep.size[i] = v;
+        // 모양 약속 지키기: 아치는 높이 = 폭/2, 바퀴는 지름 두 값 같게, 원기둥은 폭 = 깊이
+        if (ep.shape === 'barrel') { if (i === 1) ep.size[0] = v * 2; else ep.size[1] = ep.size[0] / 2; }
+        if (ep.shape === 'wheel' && i > 0) { ep.size[1] = v; ep.size[2] = v; }
+        if (ep.shape === 'cylinder' && i !== 1) { ep.size[0] = v; ep.size[2] = v; }
+        keepBottom(ep, old);
+      });
       break;
     }
     case 'import': {

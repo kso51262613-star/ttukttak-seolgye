@@ -32,6 +32,10 @@ export function builder() {
         shape: opts.shape || 'box',
         note: opts.note || ''
       };
+      // 반원 아치(barrel)의 두께. 없으면 꽉 찬 반원판
+      if (opts.wall) part.wall = r1(opts.wall);
+      // 콘크리트 속 철근, 바닥 철판처럼 칠하지 않는 부품
+      if (opts.noPaint) part.noPaint = true;
       parts.push(part);
       return part;
     }
@@ -47,3 +51,7 @@ export function spread(n, start, end) {
 
 export const SAFETY_BASE = ['보안경', '귀마개', '작업 장갑', '먼지 마스크'];
 export const SAFETY_METAL = ['용접면', '용접용 가죽 장갑', '긴팔 면 작업복', '소화기'];
+
+// 벽돌·콘크리트 작업
+export const MASONRY_TOOLS = ['고무망치', '수평자', '흙손(미장칼)', '몰탈 통과 삽', '그라인더 다이아몬드 날(벽돌 자르기)', '줄눈 흙손', '물 분무기(양생)'];
+export const MASONRY_SAFETY = ['방진 마스크(벽돌 자를 때 돌가루)', '시멘트용 고무장갑(맨손이면 피부 화상)'];

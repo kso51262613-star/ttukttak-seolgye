@@ -1,11 +1,11 @@
 // 한 번 열면 오프라인에서도 열리도록 앱 파일과 CDN 파일을 저장해 둔다.
 // 배포 갱신 시 VERSION 과 index.html 의 ?v= 를 같이 올릴 것.
-const VERSION = 'ttk-v3';
+const VERSION = 'ttk-v4';
 const APP = [
-  './', 'index.html', 'css/style.css?v=3', 'js/app.js?v=3', 'manifest.json', 'icons/icon.svg',
+  './', 'index.html', 'css/style.css?v=4', 'js/app.js?v=4', 'manifest.json', 'icons/icon.svg',
   'js/ui/viewer3d.js', 'js/ui/drawing.js', 'js/ui/tabs.js', 'js/ui/sidebar.js', 'js/ui/media.js', 'js/ui/visionDialog.js',
   'js/core/materials.js', 'js/core/model.js', 'js/core/parser.js', 'js/core/ai.js', 'js/core/cutlist.js',
-  'js/core/bom.js', 'js/core/listing.js', 'js/core/storage.js', 'js/core/prompts.js', 'js/core/vision.js',
+  'js/core/bom.js', 'js/core/listing.js', 'js/core/storage.js', 'js/core/prompts.js', 'js/core/vision.js', 'js/core/measure.js',
   'js/core/templates/index.js', 'js/core/templates/helpers.js', 'js/core/templates/wood.js',
   'js/core/templates/metal.js', 'js/core/templates/fire.js', 'js/core/templates/outdoor.js'
 ];

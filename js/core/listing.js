@@ -17,7 +17,7 @@ export function buildSteps(design, template) {
 const won = n => `${Number(n).toLocaleString('ko-KR')}원`;
 const cm = mm => Math.round(mm / 10);
 
-export function buildListing({ design, template, parts, bom, price }) {
+export function buildListing({ design, template, parts, bom, price, weight }) {
   const [w, h, d] = bounds(parts).size;
   const name = design.title || template?.name || '수제 가구';
   const mats = [...new Set(parts.map(p => MATERIALS[p.material]?.name).filter(Boolean))];
@@ -36,6 +36,7 @@ export function buildListing({ design, template, parts, bom, price }) {
     `- 자재: ${mats.join(', ')}`,
     finishes.length ? `- 마감: ${finishes.join(', ')}` : null,
     `- 제작: ${joins.join(', ') || '직접 재단·조립'}`,
+    weight >= 1 ? `- 무게: 약 ${Math.round(weight)}kg` : null,
     '- 상태: 새로 만든 제품이고 사용하지 않았어요.',
     '- 수제품이라 나무결이나 용접 자국 같은 작은 차이가 있을 수 있어요.',
     '',

@@ -1,10 +1,15 @@
 // 재단표: 자를 목록 + 원장(통 자재) 배치
 import { MATERIALS, KERF, getMaterial, isLinear } from './materials.js';
+import { partVolume, masonryCount, wrapArea } from './measure.js';
+
+// 벽돌·콘크리트·단열처럼 자르지 않고 양으로 사는 자재
+export const BULK_KINDS = new Set(['masonry', 'cast', 'wrap']);
 
 export function partCutDims(part) {
   const m = MATERIALS[part.material];
   if (!m) return {};
   if (m.kind === 'item') return { count: 1 };
+  if (BULK_KINDS.has(m.kind)) return {};
   if (isLinear(part.material)) return { length: Math.round(Math.max(...part.size)) };
   const s = [...part.size].sort((a, b) => b - a);
   return { w: Math.round(s[0]), h: Math.round(s[1]), t: m.thickness };
@@ -82,6 +87,7 @@ export function cutList(parts, priceOverrides = {}) {
   const linearCuts = {};
   const sheetPieces = {};
   const items = {};
+  const bulk = {};
   const warnings = [];
 
   for (const p of parts) {
@@ -89,7 +95,14 @@ export function cutList(parts, priceOverrides = {}) {
     if (!m) continue;
     const d = partCutDims(p);
     let label;
-    if (m.kind === 'item') {
+    if (BULK_KINDS.has(m.kind)) {
+      // 벽돌은 장 수, 콘크리트·미장은 부피, 단열 담요는 면적으로 모은다
+      let amount;
+      if (m.kind === 'masonry') { amount = masonryCount(p); label = `약 ${Math.ceil(amount)}장`; }
+      else if (m.kind === 'cast') { amount = partVolume(p); label = `부피 약 ${amount.toFixed(2)}㎥`; }
+      else { amount = wrapArea(p); label = `약 ${amount.toFixed(1)}㎡`; }
+      bulk[p.material] = (bulk[p.material] || 0) + amount;
+    } else if (m.kind === 'item') {
       label = '1개 통째로';
       items[p.material] = (items[p.material] || 0) + 1;
     } else if (d.length) {
@@ -139,9 +152,19 @@ export function cutList(parts, priceOverrides = {}) {
     addStock(key, r.sheets.length + big);
   }
   for (const [key, qty] of Object.entries(items)) addStock(key, qty);
+  for (const [key, amount] of Object.entries(bulk)) {
+    const m = MATERIALS[key];
+    let qty;
+    if (m.kind === 'masonry') qty = Math.ceil(amount * 1.05);
+    else if (m.kind === 'cast') qty = Math.ceil((amount / m.yield) * 1.1);
+    else qty = Math.ceil((amount / ((m.roll[0] * m.roll[1]) / 1e6)) * 1.1);
+    addStock(key, Math.max(1, qty));
+  }
 
-  const rows = [...rowsMap.values()].sort((a, b) => a.material.localeCompare(b.material) || parseFloat(b.label) - parseFloat(a.label));
-  return { rows, linear, sheets, items, stock, warnings };
+  // 앞의 "약 ", "부피 약 " 같은 글자를 떼고 첫 숫자로 정렬
+  const num = s => parseFloat(String(s).replace(/^[^0-9.]+/, '')) || 0;
+  const rows = [...rowsMap.values()].sort((a, b) => a.material.localeCompare(b.material) || num(b.label) - num(a.label));
+  return { rows, linear, sheets, items, bulk, stock, warnings };
 }
 
 // 자재별 원장 사용률 (0~1)

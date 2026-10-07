@@ -40,13 +40,39 @@ function renderView(parts, b, key, ox, oy, scale) {
   for (const p of sorted) {
     const fill = MATERIALS[p.material]?.group === 'metal' ? '#e3e6ea' : '#fbf3e4';
     // 둥근 부품(드럼통, 원형 파이프, 환봉, 둥근 봉)이 보는 방향을 향하면 원으로 그린다
-    const round = p.shape === 'cylinder' || materialProfile(p.material) === 'round';
-    const axis = p.shape === 'cylinder' ? 1 : longAxis(p.size);
+    const round = p.shape === 'cylinder' || p.shape === 'wheel' || (p.shape !== 'barrel' && materialProfile(p.material) === 'round');
+    const axis = p.shape === 'cylinder' ? 1 : p.shape === 'wheel' ? 0 : longAxis(p.size);
     if (round && axis === ad) {
       const cx = toX(p.pos[ah]);
       const cy = toY(p.pos[av]);
       const r = (Math.min(p.size[ah], p.size[av]) / 2) * scale;
       out += `<circle cx="${cx}" cy="${cy}" r="${Math.max(0.6, r)}" fill="${fill}" class="part"><title>${esc(p.name)}</title></circle>`;
+      continue;
+    }
+    // 캐스터는 옆에서 보면 위쪽 포크 + 아래 바퀴(원)
+    if (p.shape === 'caster' && ad === 0) {
+      const R = p.size[2] / 2;
+      const base = p.pos[1] - p.size[1] / 2;
+      const cx = toX(p.pos[2]);
+      const cy = toY(base + R);
+      const half = R * 0.45;
+      const xa2 = toX(p.pos[2] - half);
+      const xb2 = toX(p.pos[2] + half);
+      const yTop = toY(base + p.size[1]);
+      out += `<rect x="${Math.min(xa2, xb2)}" y="${Math.min(yTop, cy)}" width="${Math.abs(xb2 - xa2)}" height="${Math.abs(cy - yTop)}" fill="${fill}" class="part"/>`;
+      out += `<circle cx="${cx}" cy="${cy}" r="${R * scale}" fill="${fill}" class="part"><title>${esc(p.name)}</title></circle>`;
+      continue;
+    }
+    // 반원 아치(화덕 지붕)는 정면도에서 원호로
+    if (p.shape === 'barrel' && ad === 2) {
+      const cx = toX(p.pos[0]);
+      const yb = toY(p.pos[1] - p.size[1] / 2);
+      const R = (p.size[0] / 2) * scale;
+      const r = Number(p.wall) > 0 ? Math.max(0, (p.size[0] / 2 - p.wall) * scale) : 0;
+      const d = r > 0
+        ? `M ${cx - R} ${yb} A ${R} ${R} 0 0 1 ${cx + R} ${yb} L ${cx + r} ${yb} A ${r} ${r} 0 0 0 ${cx - r} ${yb} Z`
+        : `M ${cx - R} ${yb} A ${R} ${R} 0 0 1 ${cx + R} ${yb} Z`;
+      out += `<path d="${d}" fill="${fill}" class="part"><title>${esc(p.name)}</title></path>`;
       continue;
     }
     const xa = toX(p.pos[ah] - p.size[ah] / 2);

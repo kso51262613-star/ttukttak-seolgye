@@ -63,9 +63,53 @@ function angleBar(w, h, d, t) {
   return geo;
 }
 
+// 반원 아치: 앞(+z)에서 보면 반원 고리(wall 이 있으면 속이 빈 아치), 깊이만큼 뒤로 뽑는다. 평평한 면이 아래
+function barrel(w, h, d, wall) {
+  const R = w / 2;
+  const r = wall > 0 ? Math.max(0, R - wall) : 0;
+  const s = new THREE.Shape();
+  s.moveTo(R, 0);
+  s.absarc(0, 0, R, 0, Math.PI, false);
+  if (r > 0) {
+    s.lineTo(-r, 0);
+    s.absarc(0, 0, r, Math.PI, 0, true);
+  }
+  s.closePath();
+  const geo = new THREE.ExtrudeGeometry(s, { depth: d, bevelEnabled: false, curveSegments: 32 });
+  geo.translate(0, -R / 2, -d / 2);
+  return geo;
+}
+
+// 캐스터: 옆(x)에서 보면 위쪽 포크(사각) + 아래 바퀴(원). size = [폭 x, 전체 높이 y, 바퀴 지름 z]
+function caster(w, h, d) {
+  const R = d / 2;
+  const half = R * 0.45;
+  const yc = R - h / 2;
+  const top = h / 2;
+  const dy = Math.sqrt(R * R - half * half);
+  const a1 = Math.atan2(dy, -half);
+  const a2 = Math.atan2(dy, half);
+  const s = new THREE.Shape();
+  s.moveTo(-half, top);
+  s.lineTo(-half, yc + dy);
+  // 왼쪽 위 교점에서 바퀴 아래를 돌아 오른쪽 위 교점까지
+  s.absarc(0, yc, R, a1, a2 + Math.PI * 2, false);
+  s.lineTo(half, top);
+  s.closePath();
+  const geo = new THREE.ExtrudeGeometry(s, { depth: w, bevelEnabled: false, curveSegments: 24 });
+  geo.translate(0, 0, -w / 2);
+  geo.rotateY(Math.PI / 2);
+  return geo;
+}
+
 function partGeometry(p) {
   const [w, h, d] = p.size.map(v => v * S);
-  if (p.shape === 'cylinder') return new THREE.CylinderGeometry(w / 2, w / 2, h, 40, 1, true);
+  // 드럼통만 위아래가 뚫린 원통, 나머지 원기둥은 막힌 모양
+  if (p.shape === 'cylinder') return new THREE.CylinderGeometry(w / 2, w / 2, h, 40, 1, p.material === 'drum_200');
+  if (p.shape === 'caster') return caster(w, h, d);
+  if (p.shape === 'barrel') return barrel(w, h, d, (Number(p.wall) || 0) * S);
+  // 바퀴: 축이 x 방향인 원기둥 (지름 = 높이)
+  if (p.shape === 'wheel') return new THREE.CylinderGeometry(h / 2, h / 2, w, 28).rotateZ(Math.PI / 2);
   if (p.shape === 'notched') return notchedPlate(w, h, d);
   const prof = materialProfile(p.material);
   if (prof === 'round') return roundRod(w, h, d);
@@ -171,7 +215,7 @@ export class Viewer {
         color, roughness: MATERIALS[p.material]?.group === 'metal' ? 0.45 : 0.8,
         metalness: MATERIALS[p.material]?.group === 'metal' ? 0.5 : 0,
         emissive: sel ? '#ff7a1a' : '#000000', emissiveIntensity: sel ? 0.35 : 0,
-        side: p.shape === 'cylinder' ? THREE.DoubleSide : THREE.FrontSide
+        side: p.shape === 'cylinder' || p.shape === 'barrel' ? THREE.DoubleSide : THREE.FrontSide
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(p.pos[0] * S, p.pos[1] * S, p.pos[2] * S);

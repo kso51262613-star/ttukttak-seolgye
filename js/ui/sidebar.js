@@ -10,7 +10,7 @@ const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const SLOT_LABELS = {
   frame: '틀', top: '상판', board: '선반 판', body: '몸통 판', slat: '살', leg: '다리',
   apron: '띠장', post: '기둥', plate: '철판', body_drum: '몸통',
-  panel: '옆판', bottom: '수납칸 바닥', strap: '받침'
+  panel: '옆판', bottom: '수납칸 바닥', strap: '받침', shelf: '장작 선반'
 };
 
 const dots = n => '●'.repeat(n) + '○'.repeat(3 - n);
@@ -73,7 +73,7 @@ function selectedPanel(part, design) {
   const moved = design.moved?.[part.id];
   const sizeInputs = part.extra
     ? `<div class="xyz">${['폭', '높이', '깊이'].map((l, i) => `<label>${l}<input type="number" min="1" value="${num(part.size[i])}" data-act="part-size" data-i="${i}"></label>`).join('')}</div>
-       <div class="row-btns"><button data-act="rotate" data-axis="y">눕혀 돌리기 90°</button><button data-act="rotate" data-axis="x">세우기 90°</button></div>`
+       ${['barrel', 'wheel', 'caster', 'cylinder'].includes(part.shape) ? '' : '<div class="row-btns"><button data-act="rotate" data-axis="y">눕혀 돌리기 90°</button><button data-act="rotate" data-axis="x">세우기 90°</button></div>'}`
     : `<p class="dims">${part.size.map(v => Math.round(v)).join(' x ')} mm</p>`;
   return `<div class="sel"><h4>${esc(part.name)} <small>${esc(MATERIALS[part.material]?.name)}</small></h4>
     ${sizeInputs}
@@ -111,11 +111,15 @@ export function partFromForm(fd, id) {
   if (isLinear(material)) {
     const [t, w] = m.section;
     size = dir === 'y' ? [w, len, t] : dir === 'z' ? [t, w, len] : [len, w, t];
-  } else if (m.kind === 'sheet') {
-    const t = m.thickness;
+  } else if (m.kind === 'sheet' || m.kind === 'masonry' || m.kind === 'cast' || m.kind === 'wrap') {
+    // 벽돌 벽은 벽돌 폭, 콘크리트는 60, 단열 담요는 한 겹 두께를 기본 두께로
+    const t = m.thickness || (m.brick ? m.brick[1] : m.kind === 'cast' ? 60 : m.layer || 25);
     size = dir === 'y' ? [len, wid, t] : dir === 'z' ? [t, wid, len] : [len, t, wid];
+  } else if (material === 'caster_150') {
+    size = [40, 150, 150];
   } else {
     size = [580, 880, 580];
   }
-  return { id, name: `추가 ${m.name}`, material, size, pos: [0, size[1] / 2, 0], shape: m.kind === 'item' ? 'cylinder' : 'box', note: '' };
+  const shape = material === 'caster_150' ? 'wheel' : m.kind === 'item' ? 'cylinder' : 'box';
+  return { id, name: `추가 ${m.name}`, material, size, pos: [0, size[1] / 2, 0], shape, note: '' };
 }

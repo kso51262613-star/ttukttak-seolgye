@@ -8,6 +8,8 @@ export const AI_MODEL = 'claude-opus-5-5';
 // 버전을 고정해 둔다. 올릴 때는 tests/ai.test.js 와 브라우저에서 한 번 확인할 것
 const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.131.0/+esm';
 
+const SHAPES = new Set(['box', 'barrel', 'wheel', 'cylinder']);
+
 export function validateAIResult(obj) {
   if (!obj || !Array.isArray(obj.parts)) throw new Error('AI 응답 형식이 맞지 않아요.');
   const counts = {};
@@ -18,13 +20,22 @@ export function validateAIResult(obj) {
     if (!Array.isArray(p.pos) || p.pos.length !== 3 || !p.pos.every(Number.isFinite)) continue;
     const name = String(p.name || '부품').slice(0, 30);
     counts[name] = (counts[name] || 0) + 1;
+    // 드럼통은 늘 원기둥, 그 밖에는 받은 모양(모르는 값이면 상자)
+    let shape = p.material === 'drum_200' ? 'cylinder' : SHAPES.has(p.shape) ? p.shape : 'box';
+    const size = p.size.map(v => Math.round(v * 10) / 10);
+    // 모양마다 크기 약속을 맞춘다: 아치는 높이 = 폭/2, 바퀴는 지름 두 값이 같게, 원기둥은 위에서 보면 원
+    if (shape === 'barrel') size[1] = Math.round((size[0] / 2) * 10) / 10;
+    if (shape === 'wheel') { const d = Math.max(size[1], size[2]); size[1] = d; size[2] = d; }
+    if (shape === 'cylinder' && p.material !== 'drum_200' && Math.abs(size[0] - size[2]) > 0.05 * Math.max(size[0], size[2])) shape = 'box';
+    const wall = shape === 'barrel' && Number(p.wall) > 0 && Number(p.wall) < size[0] / 2 ? Math.round(Number(p.wall) * 10) / 10 : undefined;
     parts.push({
       id: `ai-${name}-${counts[name]}`,
       name,
       material: p.material,
-      size: p.size.map(v => Math.round(v * 10) / 10),
+      size,
       pos: [...p.pos],
-      shape: p.material === 'drum_200' ? 'cylinder' : 'box',
+      shape,
+      ...(wall ? { wall } : {}),
       note: String(p.note || '')
     });
   }

@@ -35,7 +35,7 @@ function compactPrevious(prev) {
   return {
     title: prev.title,
     analysis: prev.analysis,
-    parts: (prev.parts || []).map(p => ({ name: p.name, material: p.material, size: p.size, pos: p.pos, note: p.note || '' }))
+    parts: (prev.parts || []).map(p => ({ name: p.name, material: p.material, size: p.size, pos: p.pos, note: p.note || '', shape: p.shape || 'box', wall: p.wall || 0 }))
   };
 }
 
@@ -99,9 +99,12 @@ export function templateDesignFrom(templateId, parts) {
   const t = getTemplate(templateId);
   if (!t || t.id === 'custom') return null;
   const d = newDesign(templateId);
-  const b = bounds(parts || []);
+  // 바퀴는 몸체 크기에서 뺀다 (모서리 밖으로 조금 나올 수 있음)
+  const b = bounds((parts || []).filter(p => p.shape !== 'wheel' && p.shape !== 'caster'));
   const hint = { width: b.size[0], depth: b.size[2], height: b.size[1] };
-  for (const [k, v] of Object.entries(hint)) {
+  // 치수가 안쪽 크기인 템플릿은 전체 크기를 자기 치수로 바꾸는 방법(fromOverall)을 가진다
+  const mapped = t.fromOverall ? t.fromOverall(hint) : hint;
+  for (const [k, v] of Object.entries(mapped)) {
     if (v > 0 && t.params.some(p => p.key === k)) d.params[k] = v;
   }
   if (t.fromHints && hint.height > 0) Object.assign(d.params, t.fromHints({ height: hint.height }));

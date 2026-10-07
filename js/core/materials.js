@@ -30,8 +30,31 @@ export const MATERIALS = {
   ply_9:         { name: '합판 9T (실제 8.5mm)', kind: 'sheet', group: 'wood', thickness: 8.5, stock: [2440, 1220], price: 18000, unit: '장', color: '#e3cfa6' },
   ply_12:        { name: '합판 12T (실제 11.5mm)', kind: 'sheet', group: 'wood', thickness: 11.5, stock: [2440, 1220], price: 22000, unit: '장', color: '#dfc99c' },
   mdf_18:        { name: 'MDF 18T', kind: 'sheet', group: 'wood', thickness: 18, stock: [2440, 1220], price: 28000, unit: '장', color: '#c9b08a' },
-  dowel_30:      { name: '원목 둥근 봉 30mm', kind: 'lumber', profile: 'round', group: 'wood', section: [30, 30], stock: 1800, price: 9000, unit: '본', color: '#dcb27c' }
+  dowel_30:      { name: '원목 둥근 봉 30mm', kind: 'lumber', profile: 'round', group: 'wood', section: [30, 30], stock: 1800, price: 9000, unit: '본', color: '#dcb27c' },
+  // 2026-10-07 벽돌 화덕용 (docs/research/2026-10-07-화덕자재-단가.md)
+  // kind: masonry(벽돌, 부피로 장 수), cast(콘크리트·미장, 부피로 포대), wrap(단열 담요, 면적으로 롤)
+  sq_tube_50:    { name: '각파이프 50x50 2.3T', kind: 'tube', group: 'metal', section: [50, 50], stock: 6000, price: 23000, unit: '본', color: '#363b43', kgPerM: 3.45 },
+  stainless_pipe_125: { name: '스테인리스 연통 125 (1m)', kind: 'tube', profile: 'round', group: 'metal', section: [125, 125], stock: 1000, price: 25000, unit: '본', color: '#c9ccd1', kgPerM: 1.55, paint: false },
+  caster_150:    { name: '중량 캐스터 150mm 브레이크 (720kg급)', kind: 'item', group: 'metal', price: 80000, unit: '개', color: '#2b2b2b', itemKg: 1.5, desc: '완제품 바퀴 1개 (shape wheel, size [40, 150, 150])' },
+  red_brick:     { name: '적벽돌 190x90x57', kind: 'masonry', group: 'masonry', brick: [190, 90, 57], joint: 10, price: 800, unit: '장', color: '#b5523b', density: 1800, mortar: { name: '조적용 레미탈 40kg', per: 80, price: 6000 } },
+  fire_brick:    { name: '내화벽돌 SK-34 230x114x65', kind: 'masonry', group: 'masonry', brick: [230, 114, 65], joint: 3, price: 3500, unit: '장', color: '#e3cf9f', density: 2000, mortar: { name: '내화 몰탈 25kg', per: 50, price: 35000 } },
+  concrete_mix:  { name: '바닥용 레미탈 40kg (21MPa 이상)', kind: 'cast', group: 'masonry', yield: 0.022, price: 6000, unit: '포', color: '#a9a59c', density: 2400 },
+  cement_render: { name: '미장용 레미탈 40kg', kind: 'cast', group: 'masonry', yield: 0.02, price: 6000, unit: '포', color: '#d6cdbb', density: 2000 },
+  ceramic_blanket: { name: '세라믹 단열 담요 25T (600x7200)', kind: 'wrap', group: 'masonry', layer: 25, roll: [600, 7200], price: 45000, unit: '롤', color: '#f3f0e6', density: 128 }
 };
+
+// 무게 계산용: density(kg/㎥) 또는 kgPerM(1m 무게) 또는 itemKg(1개 무게). 목재 밀도는 건조재 기준 추정
+const WEIGHT_INFO = {
+  spf_2x4: { density: 450 }, spf_2x2: { density: 450 }, spf_1x4: { density: 450 },
+  treated_2x4: { density: 550 }, treated_2x6: { density: 550 }, slat_30: { density: 500 },
+  pine_board_18: { density: 500 }, pine_board_24: { density: 500 }, birch_ply_18: { density: 650 },
+  sq_tube_20: { kgPerM: 0.82 }, sq_tube_25: { kgPerM: 1.04 }, sq_tube_30: { kgPerM: 1.43 }, sq_tube_40: { kgPerM: 1.93 },
+  flat_bar_40: { kgPerM: 1.26 }, steel_plate_32: { density: 7850 }, steel_plate_16: { density: 7850 },
+  drum_200: { itemKg: 18, desc: '통째로 사용 (지름 580mm, 높이 880mm, shape cylinder)' },
+  round_pipe_25: { kgPerM: 0.83 }, round_pipe_32: { kgPerM: 1.05 }, round_bar_10: { kgPerM: 0.617 }, round_bar_12: { kgPerM: 0.888 },
+  angle_30: { kgPerM: 1.36 }, ply_9: { density: 550 }, ply_12: { density: 550 }, mdf_18: { density: 750 }, dowel_30: { density: 550 }
+};
+for (const [k, w] of Object.entries(WEIGHT_INFO)) Object.assign(MATERIALS[k], w);
 
 // 재단할 때 톱날이 먹는 두께
 export const KERF = { wood: 3, metal: 2 };

@@ -1,4 +1,5 @@
-import { builder, sec, thick, spread } from './helpers.js';
+import { builder, sec, thick, spread, MASONRY_TOOLS, MASONRY_SAFETY } from './helpers.js';
+import { estimateWeight } from '../measure.js';
 import { METAL_TOOLS, METAL_SAFETY } from './metal.js';
 
 const FIRE_SAFETY = [...METAL_SAFETY, '아연도금(은색 반짝이는) 자재 사용 금지: 가열·용접 때 유해 연기'];
@@ -165,4 +166,131 @@ export const fireTable = {
   ]
 };
 
-export const FIRE_TEMPLATES = [firePlate, drumFirePit, campTable, fireTable];
+// 바퀴 달린 벽돌 화덕 (2026-10-07, 사용자가 보낸 AI 영상에서). 치수 식은 docs/superpowers/specs/2026-10-07-brick-oven-design.md
+// 앞에서부터: 앞 턱(landing) > 연기 통로 아치(적벽돌, 위에 연통) > 문 > 내화벽돌 화실. 적벽돌은 화실 밖에만
+const OVEN = { fb: 114, insul: 50, render: 40, ring: 190, ringDepth: 190, landing: 150, backGap: 60, slab: 60, deck: 1.6, floorT: 65, casterH: 190, wheel: 150, plate: 100, plateT: 3.2, lowY: 300, flue: 900 };
+// 전체 크기와 안쪽 크기의 차이 (비슷한 템플릿으로 열 때 씀)
+const OVEN_EXTRA_W = 2 * (OVEN.fb + OVEN.insul + OVEN.render) + 100;
+const OVEN_EXTRA_D = OVEN.render + OVEN.insul + OVEN.fb + OVEN.ringDepth + OVEN.landing + OVEN.backGap;
+
+function ovenDims(p, m) {
+  const [s] = sec(m.frame);
+  const r = p.width / 2;
+  const Ro = r + OVEN.fb;
+  const Ri = Ro + OVEN.insul;
+  const Rs = Ri + OVEN.render;
+  const ovenD = OVEN.render + OVEN.insul + OVEN.fb + p.depth + OVEN.ringDepth;
+  // 양옆 여유 50씩: 기본 크기에서 철판 바닥이 철판 한 장(폭 1219) 안에 들어가게
+  const SW = Math.round(2 * Rs + 100);
+  const SD = Math.round(ovenD + OVEN.landing + OVEN.backGap);
+  const top = p.cartHeight;
+  const slabBase = top + OVEN.deck;
+  const floorTop = slabBase + OVEN.slab + OVEN.floorT;
+  return { s, r, Ro, Ri, Rs, SW, SD, top, slabBase, floorTop };
+}
+
+export const brickOvenCart = {
+  id: 'brick-oven-cart', name: '바퀴 달린 벽돌 화덕', category: 'fire', trend: false, difficulty: 3, laborHours: 40,
+  summary: '각파이프 받침대 위에 콘크리트 판을 붓고, 내화벽돌로 반원 지붕을 쌓은 피자 화덕. 바퀴와 수평 조절발이 달려 있어요.',
+  keywords: ['화덕', '피자화덕', '벽돌화덕', '이동식화덕', '피자오븐', '오븐', '화덕카트', '바퀴화덕'],
+  fromOverall: ({ width, depth }) => ({ width: width - OVEN_EXTRA_W, depth: depth - OVEN_EXTRA_D }),
+  params: [
+    { key: 'width', label: '화덕 안쪽 폭', unit: 'mm', min: 500, max: 900, step: 10, default: 700 },
+    { key: 'depth', label: '화덕 안쪽 깊이', unit: 'mm', min: 600, max: 1000, step: 10, default: 800 },
+    { key: 'cartHeight', label: '받침대 높이', unit: 'mm', min: 600, max: 900, step: 10, default: 750 }
+  ],
+  materialOptions: {
+    frame: ['sq_tube_50', 'sq_tube_40'],
+    shelf: ['steel_plate_16', 'pine_board_18'],
+    deck: ['steel_plate_16'], slab: ['concrete_mix'], rebar: ['round_bar_10'],
+    fire: ['fire_brick'], face: ['red_brick'], insul: ['ceramic_blanket'], render: ['cement_render'],
+    door: ['steel_plate_32'], plate: ['steel_plate_32'], flue: ['stainless_pipe_125'], caster: ['caster_150']
+  },
+  build(p, m) {
+    const b = builder();
+    const { s, r, Ro, Ri, Rs, SW, SD, top, slabBase, floorTop } = ovenDims(p, m);
+    const xL = SW / 2 - s / 2;
+    const zL = SD / 2 - s / 2;
+    // 받침대: 바퀴, 다리, 위·아래 사각 틀, 보강, 장작 선반
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      // 모서리마다 받침판(100x100) 위에 다리, 받침판 아래 캐스터(높이 약 19cm, 바퀴 지름 15cm)
+      const px = sx * (SW / 2 - OVEN.plate / 2);
+      const pz = sz * (SD / 2 - OVEN.plate / 2);
+      b.add('바퀴', m.caster, [40, OVEN.casterH, OVEN.wheel], [px, OVEN.casterH / 2, pz], { shape: 'caster', note: '브레이크 있는 중량 캐스터' });
+      b.add('바퀴 받침판', m.plate, [OVEN.plate, OVEN.plateT, OVEN.plate], [px, OVEN.casterH + OVEN.plateT / 2, pz], { note: '다리 밑에 용접, 캐스터 볼트 구멍 4개' });
+      const legBottom = OVEN.casterH + OVEN.plateT;
+      b.add('다리', m.frame, [s, top - legBottom, s], [sx * xL, legBottom + (top - legBottom) / 2, sz * zL]);
+    }
+    for (const [y, label] of [[top - s / 2, '위 틀'], [OVEN.lowY, '아래 틀']]) {
+      for (const sz of [-1, 1]) b.add(`${label} 앞뒤`, m.frame, [SW - 2 * s, s, s], [0, y, sz * zL]);
+      for (const sx of [-1, 1]) b.add(`${label} 좌우`, m.frame, [s, s, SD - 2 * s], [sx * xL, y, 0]);
+    }
+    spread(3, -SD / 4, SD / 4).forEach(z => b.add('위 보강', m.frame, [SW - 2 * s, s, s], [0, top - s / 2, z], { note: '판 받침' }));
+    spread(3, -SD / 4, SD / 4).forEach(z => b.add('아래 보강', m.frame, [SW - 2 * s, s, s], [0, OVEN.lowY, z], { note: '선반 받침' }));
+    const shT = thick(m.shelf);
+    b.add('장작 선반', m.shelf, [SW - 2 * s, shT, SD], [0, OVEN.lowY + s / 2 + shT / 2, 0], { note: '앞뒤 아래 틀과 보강 위에 얹기' });
+    // 철판 바닥 + 철근 넣은 콘크리트 판
+    b.add('철판 바닥', m.deck, [SW, OVEN.deck, SD], [0, top + OVEN.deck / 2, 0], { note: '위 틀에 용접 (콘크리트 거푸집 겸용)', noPaint: true });
+    b.add('콘크리트 판', m.slab, [SW, OVEN.slab, SD], [0, slabBase + OVEN.slab / 2, 0], { note: '테두리 나무 거푸집, 1주일 물 뿌리며 양생' });
+    const [rb] = sec(m.rebar);
+    spread(4, -SD / 2 + 100, SD / 2 - 100).forEach(z => b.add('철근 가로', m.rebar, [SW - 80, rb, rb], [0, slabBase + 25, z], { noPaint: true }));
+    spread(4, -SW / 2 + 100, SW / 2 - 100).forEach(x => b.add('철근 세로', m.rebar, [rb, rb, SD - 80], [x, slabBase + 35, 0], { noPaint: true }));
+    // 화덕: 뒤에서 앞으로 미장 뒤판, 단열 뒤판, 내화 뒷벽, 내화 지붕, 적벽돌 아치 테두리, 문
+    const zb0 = -SD / 2 + OVEN.backGap;
+    const floorD = SD - OVEN.backGap - 20;
+    b.add('내화벽돌 바닥', m.fire, [2 * Rs, OVEN.floorT, floorD], [0, floorTop - OVEN.floorT / 2, zb0 + floorD / 2], { note: '내화 몰탈 줄눈 3mm, 수평 맞추기' });
+    const arch = (name, mat, R, wall, z0, depth, note = '') =>
+      b.add(name, mat, [2 * R, R, depth], [0, floorTop + R / 2, z0 + depth / 2], { shape: 'barrel', wall, note });
+    const z1 = zb0 + OVEN.render;
+    const z2 = z1 + OVEN.insul;
+    const z3 = z2 + OVEN.fb;
+    const z4 = z3 + p.depth;
+    arch('미장 뒤판', m.render, Rs, 0, zb0, OVEN.render);
+    arch('미장 지붕', m.render, Rs, OVEN.render, z1, z4 - z1, '철망 씌우고 시멘트 미장');
+    arch('단열 뒤판', m.insul, Ri, 0, z1, OVEN.insul);
+    arch('단열 지붕', m.insul, Ri, OVEN.insul, z2, z4 - z2, '세라믹 담요 2겹');
+    arch('내화벽돌 뒷벽', m.fire, Ro, 0, z2, OVEN.fb);
+    arch('내화벽돌 지붕', m.fire, Ro, OVEN.fb, z3, p.depth, `반원 거푸집(반지름 ${r}mm) 위에 쌓기`);
+    // 문은 화실 입구(내화 지붕 앞면)를 막고, 그 앞 적벽돌 아치가 연기 통로가 된다
+    arch('적벽돌 아치 테두리', m.face, r + OVEN.ring, OVEN.ring, z4, OVEN.ringDepth, '연기 통로, 맨 위에 연기 구멍 지름 125');
+    const doorT = thick(m.door);
+    arch('아치 문', m.door, r, 0, z4, doorT, '반원으로 재단, 손잡이 2개, 화실 입구에 끼움');
+    const [fd] = sec(m.flue);
+    b.add('연통', m.flue, [fd, OVEN.flue, fd], [0, floorTop + r + OVEN.ring + OVEN.flue / 2, z4 + OVEN.ringDepth / 2], { note: '연기 통로 위, 비 가리개 달기' });
+    return b.parts;
+  },
+  hardware: () => [
+    { name: '수평 조절발 M16 (고하중)', qty: 4, unit: '개', price: 17000 },
+    { name: '연통 비 가리개(삿갓) 125', qty: 1, unit: '개', price: 22000 },
+    { name: '미장용 철망(메탈라스)', qty: 1, unit: '롤', price: 23000 },
+    { name: '아치 거푸집용 합판 9T', qty: 1, unit: '장', price: 18000 },
+    { name: '문 손잡이', qty: 2, unit: '개', price: 3000 },
+    { name: '용접봉 2.6mm', qty: 2, unit: '봉지(1kg)', price: 8000 }
+  ],
+  tools: [...METAL_TOOLS, ...MASONRY_TOOLS, '직소(거푸집 합판 자르기)'],
+  safety: [
+    ...FIRE_SAFETY, ...MASONRY_SAFETY,
+    '무게가 수백 kg에서 1톤 넘게 나가요(제작 순서 첫 줄의 계산값 확인): 평지에서만 천천히 옮기고, 쓸 때는 바퀴 브레이크와 수평 조절발로 고정',
+    '첫 불은 5~7일 동안 작게 키우며 말리기 (급하게 달구면 갈라짐)',
+    '실내·처마 밑 사용 금지, 소화기를 옆에'
+  ],
+  steps(p, m) {
+    const mats = m || Object.fromEntries(Object.entries(brickOvenCart.materialOptions).map(([k, v]) => [k, v[0]]));
+    const kg = Math.round(estimateWeight(brickOvenCart.build(p, mats)) / 10) * 10;
+    const perCaster = Math.ceil(kg / 3 / 10) * 10;
+    const r = p.width / 2;
+    return [
+      `완성 무게가 약 ${kg}kg이에요. 바퀴는 1개당 ${perCaster}kg 이상 견디는 브레이크 달린 중량 캐스터로 고르세요. 바닥이 고르지 않으면 바퀴 3개에 무게가 실려요.`,
+      '각파이프로 받침대를 만듭니다. 위·아래 사각 틀과 다리를 직각자석으로 잡아 용접하고, 위 보강 3개와 아래 보강 3개를 넣습니다. 다리 밑에 받침판을 용접하고 캐스터(높이 약 19cm)와 수평 조절발을 답니다.',
+      '위 틀에 철판 바닥을 용접하고, 철근을 가로·세로 4개씩 격자로 묶어 올립니다. 테두리에 나무 거푸집을 두르고 콘크리트를 6cm 붓고, 1주일 동안 물을 뿌리며 굳힙니다.',
+      '내화벽돌 바닥을 내화 몰탈로 평평하게 깝니다(줄눈 3mm, 수평자로 확인). 가능하면 바닥 아래에 단열 보드를 깔면 열이 덜 빠져요.',
+      `합판으로 반원 거푸집(반지름 ${r}mm)을 만들어 세우고, 내화벽돌로 반원 지붕과 뒷벽을 쌓습니다. 몰탈이 굳으면 거푸집을 빼냅니다.`,
+      `화실 입구 앞에 적벽돌로 연기 통로 아치(깊이 ${OVEN.ringDepth}mm)를 쌓고, 맨 위에 지름 125mm 연기 구멍을 내 스테인리스 연통(${OVEN.flue}mm)과 비 가리개를 답니다. 적벽돌은 화실 밖에만 써요.`,
+      '지붕과 뒷벽을 세라믹 단열 담요 2겹(5cm)으로 덮고, 철망을 씌운 뒤 시멘트로 4cm 미장합니다.',
+      `철판(3.2T)을 반원(지름 ${p.width}mm)으로 잘라 문을 만들고 손잡이를 답니다. 문은 화실 입구에 끼워 열을 가둬요.`,
+      '첫 불은 5~7일 동안 아주 작게 시작해 조금씩 키우며 말립니다. 실내·처마 밑에서는 쓰지 말고, 쓸 때는 바퀴 브레이크와 수평 조절발로 고정하고 소화기를 옆에 둡니다.'
+    ];
+  }
+};
+
+export const FIRE_TEMPLATES = [firePlate, drumFirePit, campTable, fireTable, brickOvenCart];
