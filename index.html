@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>뚝딱설계</title>
+  <meta name="description" content="목공·철공 DIY 설계 도구. 템플릿과 말로 설계, 3D 미리보기, 도면, 재단표, 준비물, 당근 판매글까지.">
+  <meta name="theme-color" content="#2f4a3a">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="css/style.css?v=3">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><img src="icons/icon.svg" alt="" width="28" height="28"><span>뚝딱설계</span></div>
+    <form class="ask" id="ask">
+      <input id="askText" type="text" autocomplete="off" placeholder="말로 설계: 예) 철제 선반 폭 90 높이 180 5단, 원목 식탁 140x70x74">
+      <button type="submit" id="askBtn">도면 만들기</button>
+    </form>
+    <div class="top-btns">
+      <button type="button" class="vision-btn" id="visionBtn" title="사진이나 영상으로 설계">📷 사진·영상</button>
+      <span class="ai-badge" id="aiBadge" title="설정에서 AI 모드를 켤 수 있어요">무료 모드</span>
+      <button class="icon" id="undoBtn" title="되돌리기 (Ctrl+Z)">↶</button>
+      <button class="icon" id="settingsBtn" title="설정">⚙</button>
+    </div>
+  </header>
+  <div class="understood" id="understood" hidden></div>
+
+  <main class="layout">
+    <aside class="left panel" id="left"></aside>
+
+    <section class="center">
+      <div class="viewer" id="viewer">
+        <div class="view-btns">
+          <button data-view="iso">입체</button>
+          <button data-view="front">정면</button>
+          <button data-view="side">측면</button>
+          <button data-view="top">윗면</button>
+        </div>
+        <div class="viewer-help">돌리기: 끌기 · 확대: 휠/두 손가락 · 부품 누르고 끌어서 옮기기</div>
+        <div class="viewer-stats" id="stats"></div>
+        <div class="ref-strip" id="refStrip" hidden></div>
+      </div>
+      <nav class="tabs" id="tabs"></nav>
+      <div class="tab-body" id="tabBody"></div>
+    </section>
+
+    <aside class="right panel" id="right"></aside>
+  </main>
+
+  <dialog id="settings">
+    <form method="dialog" class="settings">
+      <h2>설정</h2>
+      <section>
+        <h3>AI 모드 (선택)</h3>
+        <p class="note">Claude API 키를 넣으면 템플릿에 없는 모양도 말로 설계할 수 있어요(1회 약 100원). 📷 사진·영상으로 설계에도 이 키를 써요(1회 약 200~500원). 키는 이 기기에만 저장되고, 내보내기 파일에도 들어가지 않아요.</p>
+        <label>API 키 <input type="password" id="apiKey" autocomplete="off" placeholder="sk-ant-..."></label>
+        <label class="inline"><input type="checkbox" id="useAI"> 말로 설계할 때 AI 사용</label>
+      </section>
+      <section>
+        <h3>자재 단가 (원)</h3>
+        <p class="note">기본값은 2026년 10월 온라인 판매가 추정이에요. 자주 가는 가게 가격으로 바꿔 두세요.</p>
+        <div class="price-table" id="priceTable"></div>
+      </section>
+      <div class="row-btns end">
+        <button type="button" id="resetPrices">단가 기본값으로</button>
+        <button value="save" class="primary">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="vision">
+    <div class="vision">
+      <h2>사진·영상으로 설계</h2>
+      <p class="note">내 물건 사진(여러 각도로 2~4장이 좋아요)이나 영상 파일을 넣으면 구조를 파악해서 설계를 만들어요. 완전히 똑같지는 않고, 크기는 추정이에요.</p>
+      <div class="row-btns">
+        <label class="btn pick">📷 사진 고르기·찍기<input type="file" id="visionPhotos" accept="image/*" multiple hidden></label>
+        <label class="btn pick">🎬 영상 파일 고르기<input type="file" id="visionVideo" accept="video/*" hidden></label>
+      </div>
+      <div class="vision-video" id="visionVideoBox" hidden>
+        <video id="visionPlayer" controls playsinline muted></video>
+        <div class="row-btns">
+          <button type="button" id="visionAddFrame">지금 장면 추가</button>
+          <button type="button" id="visionAuto">자동으로 8장 다시 뽑기</button>
+        </div>
+      </div>
+      <div class="vision-count" id="visionCount"></div>
+      <div class="vision-thumbs" id="visionThumbs"></div>
+      <details class="vision-help" open>
+        <summary>도움말 넣기 (선택, 넣을수록 정확해요)</summary>
+        <div class="xyz">
+          <label>폭 (mm)<input type="number" min="1" data-dim="width" placeholder="예: 900"></label>
+          <label>깊이 (mm)<input type="number" min="1" data-dim="depth" placeholder="예: 350"></label>
+          <label>높이 (mm)<input type="number" min="1" data-dim="height" placeholder="예: 450"></label>
+        </div>
+        <label>메모<textarea id="visionMemo" rows="2" placeholder="예: 등받이 없음, 다리는 철, 상판은 원목"></textarea></label>
+        <label>재료<select id="visionPrefer">
+          <option value="auto">자동 (사진에 보이는 대로)</option>
+          <option value="wood">나무 위주</option>
+          <option value="metal">철 위주</option>
+          <option value="mixed">나무와 철 섞어서</option>
+        </select></label>
+      </details>
+      <p class="note">1회 약 200~500원이 들어요. 사진은 분석할 때만 클로드 서버로 보내지고, 앱에는 작은 그림만 남아요. 남의 영상은 내가 만들기 위한 참고로만 써 주세요.</p>
+      <div class="vision-msg" id="visionMsg"></div>
+      <div id="visionAction"></div>
+      <div class="row-btns end"><button type="button" id="visionClose">닫기</button></div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" hidden></div>
+  <script type="module" src="js/app.js?v=3"></script>
+</body>
+</html>
