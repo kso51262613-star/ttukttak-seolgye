@@ -1,17 +1,19 @@
 // 한 번 열면 오프라인에서도 열리도록 앱 파일과 CDN 파일을 저장해 둔다.
 // 배포 갱신 시 VERSION 과 index.html 의 ?v= 를 같이 올릴 것.
-const VERSION = 'ttk-v4';
+const VERSION = 'ttk-v5';
 const APP = [
-  './', 'index.html', 'css/style.css?v=4', 'js/app.js?v=4', 'manifest.json', 'icons/icon.svg',
+  './', 'index.html', 'css/style.css?v=5', 'js/app.js?v=5', 'manifest.json', 'icons/icon.svg',
   'js/ui/viewer3d.js', 'js/ui/drawing.js', 'js/ui/tabs.js', 'js/ui/sidebar.js', 'js/ui/media.js', 'js/ui/visionDialog.js',
   'js/core/materials.js', 'js/core/model.js', 'js/core/parser.js', 'js/core/ai.js', 'js/core/cutlist.js',
-  'js/core/bom.js', 'js/core/listing.js', 'js/core/storage.js', 'js/core/prompts.js', 'js/core/vision.js', 'js/core/measure.js',
+  'js/core/bom.js', 'js/core/listing.js', 'js/core/storage.js', 'js/core/prompts.js', 'js/core/vision.js', 'js/core/measure.js', 'js/core/aiCost.js',
   'js/core/templates/index.js', 'js/core/templates/helpers.js', 'js/core/templates/wood.js',
   'js/core/templates/metal.js', 'js/core/templates/fire.js', 'js/core/templates/outdoor.js'
 ];
 
+// 새 버전을 받을 때는 브라우저에 남은 옛 파일을 쓰지 않고 서버에서 새로 받는다
+// (옛 모듈이 섞이면 새 app.js 가 없는 기능을 찾다가 빈 화면이 될 수 있음)
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(APP)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll(APP.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim()));

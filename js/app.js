@@ -9,7 +9,8 @@ import { cutList } from './core/cutlist.js';
 import { buildBom } from './core/bom.js';
 import { buildSteps, buildListing, suggestPrice } from './core/listing.js';
 import { parseText } from './core/parser.js';
-import { designWithAI, designFromImages } from './core/ai.js';
+import { designWithAI, designFromImages, checkApiKey, cleanKey } from './core/ai.js';
+import { addUsage, usageThisMonth } from './core/aiCost.js';
 import { designFromVision, templateDesignFrom, cleanRefImages } from './core/vision.js';
 import { initVisionDialog } from './ui/visionDialog.js';
 import { createStore, browserBackend, isSafeUrl } from './core/storage.js';
@@ -17,6 +18,11 @@ import { createStore, browserBackend, isSafeUrl } from './core/storage.js';
 const $ = sel => document.querySelector(sel);
 const store = createStore(browserBackend());
 let settings = store.getSettings();
+// 예전 버전은 키의 앞뒤 빈칸만 지워 저장했으므로 한 번 더 정리한다
+if (settings.apiKey && settings.apiKey !== cleanKey(settings.apiKey)) {
+  settings = { ...settings, apiKey: cleanKey(settings.apiKey) };
+  store.saveSettings(settings);
+}
 let links = store.getLinks();
 let design = store.getDesign(store.getCurrentId()) || { ...newDesign('metal-shelf'), fresh: true };
 let leftView = 'templates';
@@ -27,6 +33,9 @@ const undoStack = [];
 let gesture = false;
 // 이번 접속에서 마지막으로 분석한 사진·장면 (고쳐서 다시 분석할 때 씀)
 let lastVision = null;
+// AI 한 번에 드는 돈 (참고값, 화면 안내용)
+const AI_TEXT_COST = '약 100~300원';
+const AI_PHOTO_COST = '약 200~400원';
 
 // ---------- 계산 ----------
 function compute() {
@@ -75,8 +84,9 @@ function renderAll({ refit = false } = {}) {
   renderLeftPanel();
   renderRightPanel();
   renderTabs();
-  $('#aiBadge').textContent = settings.useAI && settings.apiKey ? 'AI 모드' : '무료 모드';
-  $('#aiBadge').classList.toggle('on', !!(settings.useAI && settings.apiKey));
+  const aiOn = !!(settings.useAI && settings.apiKey);
+  $('#aiBadge').textContent = aiOn ? 'AI 켜짐' : '무료 모드';
+  $('#aiBadge').classList.toggle('on', aiOn);
 }
 
 // ---------- 저장과 되돌리기 ----------
@@ -171,12 +181,13 @@ function showUnderstood(lines, unknown = [], candidates = [], extraHtml = '') {
 }
 
 // ---------- 사진·영상으로 설계 ----------
-function showVisionUnderstood(d) {
+function showVisionUnderstood(d, costLine = '') {
   const similar = d.similarTemplate ? getTemplate(d.similarTemplate) : null;
   const canFix = lastVision && lastVision.designId === d.id;
   const extra = `<div class="vision-extra">
       ${similar ? `<button data-act="open-similar" data-id="${esc(similar.id)}">비슷한 템플릿으로 열기: ${esc(similar.name)} (치수 조절이 쉬워요)</button>` : ''}
-      ${canFix ? `<form class="fix-form" data-act="vision-fix"><input name="fix" required maxlength="300" placeholder="틀린 점 (예: 다리는 4개, 높이는 더 낮게, 상판은 원목)"><button type="submit">고쳐서 다시 분석</button></form>` : ''}
+      ${canFix ? `<form class="fix-form" data-act="vision-fix"><input name="fix" required maxlength="300" placeholder="틀린 점 (예: 다리는 4개, 높이는 더 낮게, 상판은 원목)"><button type="submit">고쳐서 다시 분석 (${AI_PHOTO_COST})</button></form>` : ''}
+      ${costLine ? `<p class="note">${esc(costLine)}</p>` : ''}
       <p class="note">${d.source === 'video' ? '영상' : '사진'}을 보고 만든 참고용 설계예요. 크기는 추정이니 실제 물건을 재서 확인하세요.</p>
     </div>`;
   const assumptions = Array.isArray(d.aiAssumptions) ? d.aiAssumptions : [];
@@ -184,11 +195,12 @@ function showVisionUnderstood(d) {
 }
 
 function applyVisionResult(result, { images, options, refImages, source }) {
+  const cost = noteUsage(result.costKrw);
   const next = designFromVision(result, { refImages, source });
   lastVision = { images, options, result, refImages: next.refImages, source: next.source, designId: next.id };
   switchDesign(next);
-  showVisionUnderstood(next);
-  toast('설계를 만들었어요. 부품을 눌러 크기와 위치를 고칠 수 있어요.');
+  showVisionUnderstood(next, cost);
+  toast(`설계를 만들었어요.${cost ? ` ${cost}.` : ''} 부품을 눌러 크기와 위치를 고칠 수 있어요.`);
 }
 
 async function fixVision(text, form) {
@@ -201,48 +213,102 @@ async function fixVision(text, form) {
   try {
     const options = { ...base.options, previous: base.result, correction: text };
     const r = await designFromImages(base.images, options, settings.apiKey);
+    const cost = noteUsage(r.costKrw);
     const next = designFromVision(r, { refImages: base.refImages, source: base.source });
     lastVision = { ...base, result: r, designId: next.id };
     switchDesign(next);
-    showVisionUnderstood(next);
-    toast('고친 점을 반영해서 새 설계를 만들었어요. 이전 설계는 내 작업에 남아 있어요.');
+    showVisionUnderstood(next, cost);
+    toast(`고친 점을 반영해서 새 설계를 만들었어요.${cost ? ` ${cost}.` : ''} 이전 설계는 내 작업에 남아 있어요.`);
   } catch (e) {
-    toast(e.message);
+    const cost = noteUsage(e.costKrw);
+    toast(cost ? `${e.message} (${cost})` : e.message);
     btn.disabled = false;
-    btn.textContent = '고쳐서 다시 분석';
+    btn.textContent = `고쳐서 다시 분석 (${AI_PHOTO_COST})`;
   }
 }
 
-async function ask(text) {
-  if (!text.trim()) return;
-  if (settings.useAI && settings.apiKey) {
-    const btn = $('#askBtn');
-    btn.disabled = true;
-    btn.textContent = 'AI가 설계 중...';
-    try {
-      const r = await designWithAI(text, settings.apiKey);
-      const next = newDesign('custom');
-      Object.assign(next, { title: r.title, extraParts: r.parts, aiSteps: r.steps, aiHardware: r.hardware });
-      switchDesign(next);
-      showUnderstood([`AI가 만든 설계: ${r.title}`, `부품 ${r.parts.length}개`, '부품을 눌러 크기와 위치를 고칠 수 있어요.']);
-      return;
-    } catch (e) {
-      toast(`${e.message} 무료 모드로 해석할게요.`);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '도면 만들기';
-    }
+// ---------- AI 사용 요금 (참고값) ----------
+// 돈이 든 요청이면 이번 달 기록에 더하고 알림 문구를 돌려준다.
+// 폰 앱과 브라우저 탭에서 따로 써도 합쳐지도록 저장된 값을 새로 읽어서 더한다
+function noteUsage(krw) {
+  if (!Number.isFinite(krw)) return '';
+  store.saveAiUsage(addUsage(store.getAiUsage(), krw));
+  return `이번 AI 사용 약 ${won(krw)} (참고값)`;
+}
+
+// 말로 설계: 무료 해석이 먼저. AI 는 사용자가 버튼을 누를 때만 쓴다 (돈이 들어서)
+let lastAsk = null; // { text, found }
+// AI 설계 요청이 진행 중인지. 진행 중에는 버튼을 새로 그리지 않아 같은 요청에 돈을 두 번 쓰지 않게 한다
+let aiBusy = false;
+function aiOfferHtml(found) {
+  if (!settings.useAI) return found ? '' : '<p class="note">템플릿에 없는 모양은 설정에서 "AI 도움"을 켜면 AI로 설계할 수 있어요.</p>';
+  if (found) return `<div class="ai-offer small"><button type="button" data-act="ai-design">원하는 모양이 아니면 AI로 설계 (${AI_TEXT_COST})</button></div>`;
+  if (!settings.apiKey) return '<div class="ai-offer"><p>AI로 설계하려면 클로드 API 키가 필요해요.</p><button type="button" data-act="open-key-settings">설정 열기 (키 만드는 법)</button></div>';
+  return `<div class="ai-offer"><p>AI로 설계할까요? 템플릿에 없는 모양도 부품 목록으로 만들어 줘요.</p><button type="button" class="primary" data-act="ai-design">AI로 설계하기 (${AI_TEXT_COST})</button></div>`;
+}
+// 설정을 바꾸면 화면에 떠 있는 제안도 바로 바꿀 수 있게 자리를 감싸 둔다
+const aiOffer = found => `<div class="ai-offer-slot">${aiOfferHtml(found)}</div>`;
+function refreshAiOffer() {
+  if (aiBusy) return;
+  const slot = document.querySelector('#understood .ai-offer-slot');
+  if (slot && lastAsk) slot.innerHTML = aiOfferHtml(lastAsk.found);
+}
+// 알림은 금방 사라지므로 버튼 아래에도 한 줄 남긴다 (글자는 textContent 로)
+function setOfferMsg(btn, msg) {
+  const box = btn.closest('.ai-offer');
+  if (!box) return;
+  let p = box.querySelector('.ai-err');
+  if (!msg) { p?.remove(); return; }
+  if (!p) { p = document.createElement('p'); p.className = 'ai-err'; box.appendChild(p); }
+  p.textContent = msg;
+}
+
+async function runAiDesign(btn) {
+  const text = lastAsk?.text || '';
+  if (!text.trim() || aiBusy) return;
+  // 설정에서 끈 뒤에 화면에 남은 버튼을 눌러도 돈이 들지 않게
+  if (!settings.useAI) { refreshAiOffer(); toast('설정에서 AI 도움이 꺼져 있어요. 켜면 AI로 설계할 수 있어요.'); return; }
+  if (!settings.apiKey) { openSettings({ guide: true }); toast('AI로 설계하려면 클로드 API 키가 필요해요. 키 만드는 법을 펼쳐 두었어요.'); return; }
+  const label = btn.textContent;
+  aiBusy = true;
+  btn.disabled = true;
+  btn.textContent = 'AI가 설계 중이에요... (20초~1분)';
+  setOfferMsg(btn, '');
+  $('#askBtn').disabled = true;
+  try {
+    const r = await designWithAI(text, settings.apiKey);
+    const cost = noteUsage(r.costKrw);
+    const next = newDesign('custom');
+    Object.assign(next, { title: r.title, extraParts: r.parts, aiSteps: r.steps, aiHardware: r.hardware });
+    switchDesign(next);
+    showUnderstood([`AI가 만든 설계: ${r.title}`, `부품 ${r.parts.length}개`, '부품을 눌러 크기와 위치를 고칠 수 있어요.', cost].filter(Boolean));
+    toast(`AI 설계를 만들었어요.${cost ? ` ${cost}.` : ''}`);
+  } catch (e) {
+    const cost = noteUsage(e.costKrw);
+    const msg = cost ? `${e.message} (${cost})` : e.message;
+    toast(msg);
+    btn.disabled = false;
+    btn.textContent = label;
+    setOfferMsg(btn, msg);
+  } finally {
+    aiBusy = false;
+    $('#askBtn').disabled = false;
   }
+}
+
+function ask(text) {
+  if (!text.trim()) return;
   const r = parseText(text);
+  lastAsk = { text, found: !!r.templateId };
   if (!r.templateId) {
-    showUnderstood(['어떤 작품인지 찾지 못했어요. 아래 후보에서 고르거나, 설정에서 AI 모드를 켜 보세요.'], r.unknown, r.candidates);
+    showUnderstood(['어떤 작품인지 템플릿에서 찾지 못했어요.'], r.unknown, r.candidates, aiOffer(false));
     return;
   }
   const next = newDesign(r.templateId);
   next.params = r.params;
   next.materials = r.materials;
   switchDesign(next);
-  showUnderstood(r.understood, r.unknown, r.candidates.filter(id => id !== r.templateId).slice(0, 2));
+  showUnderstood(r.understood, r.unknown, r.candidates.filter(id => id !== r.templateId).slice(0, 2), aiOffer(true));
 }
 
 // ---------- 파일 내보내기 ----------
@@ -267,33 +333,100 @@ function toast(msg) {
 }
 
 // ---------- 설정 ----------
-function openSettings() {
+function setKeyMsg(text, kind = '') {
+  const el = $('#keyMsg');
+  el.textContent = text;
+  el.className = `key-msg ${kind}`;
+  el.hidden = !text;
+}
+// 키 칸이 바뀌거나 창을 다시 열 때마다 늘어나는 번호. 늦게 온 옛 "키 확인" 결과는 버린다
+let keySeq = 0;
+// 처음 키를 넣을 때 AI 도움 칸을 한 번만 켜 준다 (사용자가 끄면 다시 켜지 않게)
+let autoCheckedAI = false;
+// guide: 키 만드는 법을 펼쳐서 연다 (저장된 키가 없을 때도 펼침)
+function openSettings({ guide = false } = {}) {
+  keySeq++;
+  autoCheckedAI = false;
+  $('#keyCheck').disabled = false;
   $('#apiKey').value = settings.apiKey || '';
+  $('#apiKey').type = 'password';
+  $('#keyShow').textContent = '보기';
   $('#useAI').checked = !!settings.useAI;
+  setKeyMsg('');
+  $('#keyGuide').open = guide || !settings.apiKey;
+  const u = usageThisMonth(store.getAiUsage());
+  $('#aiUsageLine').textContent = `이번 달 이 기기에서 AI 사용: 약 ${won(u.krw)} (${u.count}번). 참고값이라 실제 청구 금액은 클로드 콘솔에서 확인하세요.`;
   $('#priceTable').innerHTML = Object.entries(MATERIALS).map(([k, m]) => `<label><span>${esc(m.name)} <small>/${m.unit}</small></span>
-    <input type="number" min="0" step="any" data-price="${k}" value="${settings.priceOverrides?.[k] ?? m.price}"></label>`).join('');
+    <input type="number" min="0" step="any" data-price="${k}" value="${esc(String(settings.priceOverrides?.[k] ?? m.price))}"></label>`).join('');
   $('#settings').showModal();
 }
 // 저장 버튼을 누르는 순간 바로 저장한다 (dialog close 이벤트는 브라우저 상태에 따라 늦게 올 수 있음)
 $('#settings form').addEventListener('submit', e => {
   if (e.submitter?.value !== 'save') return;
+  const key = cleanKey($('#apiKey').value);
+  // sk-ant- 로 시작하지 않는 글(다른 비밀번호 같은 것)이 클로드로 보내지지 않게 저장을 막는다
+  if (key && !key.startsWith('sk-ant-')) {
+    e.preventDefault();
+    setKeyMsg('클로드 키는 sk-ant- 로 시작해요. 복사가 덜 됐는지 확인해 주세요. 키 없이 쓰려면 칸을 비우고 저장하세요.', 'bad');
+    $('#apiKey').focus();
+    return;
+  }
   const overrides = {};
   document.querySelectorAll('[data-price]').forEach(inp => {
     if (inp.value.trim() === '') return;
     const v = Number(inp.value);
     if (Number.isFinite(v) && v >= 0 && v !== MATERIALS[inp.dataset.price].price) overrides[inp.dataset.price] = v;
   });
-  settings = { ...settings, apiKey: $('#apiKey').value.trim(), useAI: $('#useAI').checked, priceOverrides: overrides };
+  settings = { ...settings, apiKey: key, useAI: $('#useAI').checked, priceOverrides: overrides };
   store.saveSettings(settings);
   compute();
   renderAll();
   vision.refresh();
+  refreshAiOffer();
   toast('설정을 저장했어요.');
+});
+// 닫기는 저장하지 않고 닫는다 (Enter 를 누르면 저장 버튼이 눌리게 submit 버튼이 아님)
+$('#settingsClose').addEventListener('click', () => $('#settings').close());
+
+$('#apiKey').addEventListener('input', () => {
+  keySeq++;
+  $('#keyCheck').disabled = false;
+  setKeyMsg('');
+  // 처음 키를 넣을 때는 AI 도움을 켜 둔다 (쓰기 전에 늘 물어보므로 돈이 바로 들지 않음)
+  if (!settings.apiKey && !autoCheckedAI && $('#apiKey').value.trim()) {
+    $('#useAI').checked = true;
+    autoCheckedAI = true;
+  }
+});
+$('#keyShow').addEventListener('click', () => {
+  const inp = $('#apiKey');
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  $('#keyShow').textContent = show ? '숨기기' : '보기';
+});
+$('#keyCheck').addEventListener('click', async () => {
+  const btn = $('#keyCheck');
+  const key = cleanKey($('#apiKey').value);
+  $('#apiKey').value = key;
+  const seq = ++keySeq;
+  btn.disabled = true;
+  setKeyMsg('확인 중이에요...');
+  let r;
+  try {
+    r = await checkApiKey(key);
+  } catch (e) {
+    r = { ok: false, message: `확인 중 문제가 생겼어요: ${e.message}` };
+  }
+  // 그 사이 키를 바꾸거나 창을 다시 열었으면 옛 결과는 버린다
+  if (seq !== keySeq) return;
+  setKeyMsg(r.message, r.ok ? 'ok' : 'bad');
+  btn.disabled = false;
 });
 
 const vision = initVisionDialog({
   getApiKey: () => settings.apiKey,
   onResult: applyVisionResult,
+  onCost: noteUsage,
   openSettings,
   toast
 });
@@ -303,7 +436,8 @@ $('#resetPrices').addEventListener('click', () => {
 
 // ---------- 이벤트 ----------
 $('#ask').addEventListener('submit', e => { e.preventDefault(); ask($('#askText').value); });
-$('#settingsBtn').addEventListener('click', openSettings);
+$('#settingsBtn').addEventListener('click', () => openSettings());
+$('#aiBadge').addEventListener('click', () => openSettings());
 $('#visionBtn').addEventListener('click', () => vision.open());
 $('#undoBtn').addEventListener('click', undo);
 document.querySelectorAll('.view-btns button').forEach(b => b.addEventListener('click', () => viewer.setView(b.dataset.view)));
@@ -398,6 +532,8 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'open-prices': openSettings(); break;
+    case 'ai-design': runAiDesign(t); break;
+    case 'open-key-settings': openSettings({ guide: true }); break;
   }
 });
 

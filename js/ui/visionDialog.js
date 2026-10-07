@@ -10,7 +10,7 @@ function spreadPick(list, k) {
   return Array.from({ length: k }, (_, i) => list[Math.round((i * (list.length - 1)) / (k - 1))]);
 }
 
-export function initVisionDialog({ getApiKey, onResult, openSettings, toast }) {
+export function initVisionDialog({ getApiKey, onResult, onCost, openSettings, toast }) {
   const dlg = document.getElementById('vision');
   const $ = s => dlg.querySelector(s);
   let items = [];
@@ -33,12 +33,12 @@ export function initVisionDialog({ getApiKey, onResult, openSettings, toast }) {
     const el = $('#visionAction');
     if (!getApiKey()) {
       el.innerHTML = `<div class="vision-nokey"><b>앱 안 분석에는 클로드 API 키가 필요해요.</b>
-        <p>설정에서 키를 넣거나, 키 없이 하려면 클로드와의 대화창에 사진, 영상 파일, 릴스 링크를 보내고 <b>"사진으로 설계해줘"</b>라고 말하세요. 불러오기 파일을 만들어 드려요.</p>
-        <div class="row-btns"><button type="button" data-v="settings">설정 열기</button></div></div>`;
+        <p>설정 화면에 키 만드는 법이 있어요. 키 없이 하려면 클로드와의 대화창에 사진, 영상 파일, 릴스 링크를 보내고 <b>"사진으로 설계해줘"</b>라고 말하세요. 불러오기 파일을 만들어 드려요.</p>
+        <div class="row-btns"><button type="button" data-v="settings">설정 열기 (키 만드는 법)</button></div></div>`;
       return;
     }
     const disabled = !items.length || locked();
-    el.innerHTML = `<button type="button" class="primary big-btn" data-v="analyze" ${disabled ? 'disabled' : ''}>${busy ? 'AI가 분석 중이에요... (20초~1분)' : '분석해서 설계 만들기'}</button>`;
+    el.innerHTML = `<button type="button" class="primary big-btn" data-v="analyze" ${disabled ? 'disabled' : ''}>${busy ? 'AI가 분석 중이에요... (20초~1분)' : '분석해서 설계 만들기 (약 200~400원)'}</button>`;
   }
 
   function render() {
@@ -188,9 +188,12 @@ export function initVisionDialog({ getApiKey, onResult, openSettings, toast }) {
       if (dlg.open) dlg.close();
       return;
     } catch (e) {
-      setMsg(e.message, 'err');
+      // 응답을 받은 뒤 실패했으면 요금이 나갔으므로 기록하고 금액도 알려 준다
+      const cost = onCost?.(e.costKrw) || '';
+      const msg = cost ? `${e.message} (${cost})` : e.message;
+      setMsg(msg, 'err');
       // 창을 닫은 뒤에 실패하면 알림으로 알려 준다
-      if (!dlg.open) toast(e.message);
+      if (!dlg.open) toast(msg);
     }
     busy = false;
     render();

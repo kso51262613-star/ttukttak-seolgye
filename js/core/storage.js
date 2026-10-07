@@ -1,10 +1,27 @@
 // 기기 안 저장 (localStorage 같은 backend). 저장이 막혀도 앱은 메모리로 계속 동작한다.
 import { cleanRefImages } from './vision.js';
-const K = { designs: 'ttk.designs', settings: 'ttk.settings', links: 'ttk.links', current: 'ttk.current' };
+import { MATERIALS } from './materials.js';
+const K = { designs: 'ttk.designs', settings: 'ttk.settings', links: 'ttk.links', current: 'ttk.current', aiUsage: 'ttk.aiUsage' };
 const APP = 'ttukttak';
 const SAFE_ID = /^[\w-]{1,80}$/;
 export const isSafeUrl = u => typeof u === 'string' && /^https?:\/\//i.test(u);
 const isSafeLink = l => l && SAFE_ID.test(String(l.id)) && isSafeUrl(l.url);
+
+// 불러온 파일의 설정은 아는 칸만, 맞는 모양만 받는다.
+// 남이 만든 백업 파일로 화면에 코드를 심어 API 키를 빼 가지 못하게 하려는 것
+export function cleanImportedSettings(s) {
+  const out = {};
+  if (s.priceOverrides && typeof s.priceOverrides === 'object') {
+    const prices = {};
+    for (const [k, v] of Object.entries(s.priceOverrides)) {
+      if (Object.hasOwn(MATERIALS, k) && typeof v === 'number' && Number.isFinite(v) && v >= 0) prices[k] = v;
+    }
+    out.priceOverrides = prices;
+  }
+  if (typeof s.useAI === 'boolean') out.useAI = s.useAI;
+  if (typeof s.hourlyRate === 'number' && Number.isFinite(s.hourlyRate) && s.hourlyRate >= 0) out.hourlyRate = s.hourlyRate;
+  return out;
+}
 
 export function memoryBackend() {
   const m = new Map();
@@ -85,6 +102,9 @@ export function createStore(backend) {
     },
     getSettings() { return { apiKey: '', priceOverrides: {}, hourlyRate: 15000, ...read(K.settings, {}) }; },
     saveSettings(s) { write(K.settings, { ...store.getSettings(), ...s }); },
+    // 이번 달 AI 사용 요금 기록 (참고값). 내보내기에는 넣지 않는다
+    getAiUsage() { return read(K.aiUsage, null); },
+    saveAiUsage(u) { write(K.aiUsage, u); },
     getLinks() { return read(K.links, []); },
     saveLinks(list) { write(K.links, list); },
     getCurrentId() { return read(K.current, null); },
@@ -114,10 +134,8 @@ export function createStore(backend) {
       const existing = store.getLinks();
       const ids = new Set(existing.map(l => l.id));
       write(K.links, [...existing, ...links.filter(l => l && !ids.has(l.id))]);
-      if (data.settings) {
-        const { apiKey, ...rest } = data.settings;
-        store.saveSettings(rest);
-      }
+      // 키는 절대 받지 않고, 나머지도 정해진 칸만
+      if (data.settings && typeof data.settings === 'object') store.saveSettings(cleanImportedSettings(data.settings));
       return { designs: n, links: links.length };
     }
   };
