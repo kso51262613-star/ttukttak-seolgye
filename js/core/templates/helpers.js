@@ -36,6 +36,8 @@ export function builder() {
       if (opts.wall) part.wall = r1(opts.wall);
       // 콘크리트 속 철근, 바닥 철판처럼 칠하지 않는 부품
       if (opts.noPaint) part.noPaint = true;
+      // 기울인 부품 [x, y, z] 도 (해먹 거치대의 비스듬한 기둥처럼)
+      if (opts.rot && opts.rot.some(Boolean)) part.rot = opts.rot.map(r1);
       parts.push(part);
       return part;
     }

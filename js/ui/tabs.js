@@ -86,8 +86,11 @@ function shippingNote(cut) {
     const m = MATERIALS[k];
     return m && (m.kind === 'sheet' || (isLinear(k) && m.stock >= 6000));
   });
+  // 90x90 같은 굵은 각재 3.6m 도 택배가 안 된다
+  const timber = Object.keys(cut?.stock || {}).some(k => MATERIALS[k]?.kind === 'lumber' && Math.min(...(MATERIALS[k].section || [0])) >= 89);
   const masonry = Object.keys(cut?.stock || {}).some(k => MATERIALS[k]?.group === 'masonry');
   let html = heavy ? '<p class="note ship">6m 철재나 통 판재는 인터넷으로 주문하면 택배가 안 돼서 화물 운임(약 8만~10만 원)이 따로 들 수 있어요. 동네 철물점·목재소에서 잘라서 사면 더 쌀 수 있어요.</p>' : '';
+  if (timber) html += '<p class="note ship">굵은 각재(90x90) 3.6m 는 택배가 안 돼서 화물비(약 1.5만~2만 원)가 따로 들어요. 가까운 목재소에서 재단해 달라고 하면 차에 실어 올 수 있어요.</p>';
   if (masonry) html += '<p class="note ship">벽돌·레미탈처럼 무거운 자재는 택배로 사면 배송비 때문에 동네 건재상보다 3~5배 비싸요. 가까운 건재상에서 사세요. 적벽돌은 불이 닿는 안쪽에 쓰면 안 돼요(내화벽돌만).</p>';
   return html;
 }

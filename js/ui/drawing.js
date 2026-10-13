@@ -1,8 +1,28 @@
 // 3면도(정면·측면·윗면) SVG. 모든 뷰가 같은 축척을 쓴다.
-import { bounds } from '../core/model.js';
+import { bounds, hasRot, partCorners, partBox, isRef } from '../core/model.js';
 import { MATERIALS, materialProfile, longAxis } from '../core/materials.js';
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const r2 = v => Math.round(v * 100) / 100;
+
+// 볼록 껍질 (monotone chain). 기울인 부품을 뷰에 비춘 꼭짓점들의 바깥 모양
+function convexHull(points) {
+  const pts = [...new Map(points.map(([x, y]) => [`${r2(x)},${r2(y)}`, [x, y]])).values()]
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (pts.length < 3) return pts;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = list => {
+    const out = [];
+    for (const q of list) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], q) <= 0) out.pop();
+      out.push(q);
+    }
+    return out;
+  };
+  const lower = half(pts);
+  const upper = half([...pts].reverse());
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
 
 // 뷰마다 [가로축, 세로축, 깊이축(가까운 쪽이 큰 값)]
 const VIEWS = {
@@ -27,18 +47,35 @@ function dimV(y1, y2, x, label) {
   <text x="${x - 8}" y="${my}" text-anchor="middle" transform="rotate(-90 ${x - 8} ${my})">${label}</text></g>`;
 }
 
-function renderView(parts, b, key, ox, oy, scale) {
+// b = 배치 범위(참고용 포함), dims = 치수선 범위(진짜 부품만)
+function renderView(parts, b, dims, key, ox, oy, scale) {
   const v = VIEWS[key];
   const [ah, av, ad] = v.axes;
   const W = b.size[ah] * scale;
   const H = b.size[av] * scale;
   const toX = val => v.flipH ? ox + (b.max[ah] - val) * scale : ox + (val - b.min[ah]) * scale;
   const toY = val => v.flipV ? oy + (b.max[av] - val) * scale : oy + (val - b.min[av]) * scale;
-  // 먼 부품부터 그려서 가까운 부품이 위에 오게
-  const sorted = [...parts].sort((p, q) => (p.pos[ad] + p.size[ad] / 2) - (q.pos[ad] + q.size[ad] / 2));
+  // 먼 부품부터 그려서 가까운 부품이 위에 오게 (기울인 부품은 기울어진 범위로)
+  const near = p => partBox(p).max[ad];
+  // 참고용 부품은 맨 뒤에 흐리게
+  const sorted = [...parts].sort((p, q) => (isRef(q) - isRef(p)) || near(p) - near(q));
   let out = `<text class="vtitle" x="${ox}" y="${oy - 34}">${v.title}</text>`;
   for (const p of sorted) {
     const fill = MATERIALS[p.material]?.group === 'metal' ? '#e3e6ea' : '#fbf3e4';
+    const cls = isRef(p) ? 'ref' : 'part';
+    // 기울인 부품: 꼭짓점 8개를 이 뷰에 비춘 볼록 다각형으로 그린다
+    if (hasRot(p)) {
+      const hull = convexHull(partCorners(p).map(c => [toX(c[ah]), toY(c[av])]));
+      out += `<polygon points="${hull.map(([x, y]) => `${r2(x)},${r2(y)}`).join(' ')}" fill="${fill}" class="${cls}"><title>${esc(p.name)} ${p.size.map(nice).join('x')}</title></polygon>`;
+      continue;
+    }
+    // 참고용 부품(만들지 않음)은 점선 상자로만
+    if (isRef(p)) {
+      const xa = toX(p.pos[ah] - p.size[ah] / 2), xb = toX(p.pos[ah] + p.size[ah] / 2);
+      const ya = toY(p.pos[av] - p.size[av] / 2), yb = toY(p.pos[av] + p.size[av] / 2);
+      out += `<rect x="${Math.min(xa, xb)}" y="${Math.min(ya, yb)}" width="${Math.max(0.6, Math.abs(xb - xa))}" height="${Math.max(0.6, Math.abs(yb - ya))}" class="ref"><title>${esc(p.name)} (참고용)</title></rect>`;
+      continue;
+    }
     // 둥근 부품(드럼통, 원형 파이프, 환봉, 둥근 봉)이 보는 방향을 향하면 원으로 그린다
     const round = p.shape === 'cylinder' || p.shape === 'wheel' || (p.shape !== 'barrel' && materialProfile(p.material) === 'round');
     const axis = p.shape === 'cylinder' ? 1 : p.shape === 'wheel' ? 0 : longAxis(p.size);
@@ -81,14 +118,18 @@ function renderView(parts, b, key, ox, oy, scale) {
     const yb = toY(p.pos[av] + p.size[av] / 2);
     out += `<rect x="${Math.min(xa, xb)}" y="${Math.min(ya, yb)}" width="${Math.max(0.6, Math.abs(xb - xa))}" height="${Math.max(0.6, Math.abs(yb - ya))}" fill="${fill}" class="part"><title>${esc(p.name)} ${p.size.map(nice).join('x')}</title></rect>`;
   }
-  out += dimH(ox, ox + W, oy + H + 26, `${nice(b.size[ah])}`);
-  out += dimV(oy, oy + H, ox - 22, `${nice(b.size[av])}`);
+  // 치수선은 진짜 부품 범위만
+  out += dimH(toX(dims.min[ah]), toX(dims.max[ah]), oy + H + 26, `${nice(dims.size[ah])}`);
+  out += dimV(toY(dims.max[av]), toY(dims.min[av]), ox - 22, `${nice(dims.size[av])}`);
   return out;
 }
 
 export function renderDrawing(parts, { title = '', subtitle = '' } = {}) {
   if (!parts.length) return '<p class="empty">부품이 없어요. 템플릿을 고르거나 부품을 추가해 주세요.</p>';
-  const b = bounds(parts);
+  // 배치는 참고용까지 넣고, 치수와 부품 수는 진짜 부품만
+  const b = bounds(parts, { includeRef: true });
+  const dims = bounds(parts);
+  const realCount = parts.filter(p => !isRef(p)).length;
   const cell = { w: 380, h: 300 };
   const pad = 70;
   const fit = (w, h) => Math.min(cell.w / Math.max(w, 1), cell.h / Math.max(h, 1));
@@ -108,21 +149,22 @@ export function renderDrawing(parts, { title = '', subtitle = '' } = {}) {
   <defs><marker id="arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker></defs>
   <style>
     .part{stroke:#222;stroke-width:1}
+    .ref{stroke:#9aa0a6;stroke-width:1;stroke-dasharray:4 3;fill:#f4f5f3}
     .dim line{stroke:#c0392b;stroke-width:1}
     .dim text{fill:#c0392b;font-size:13px;font-weight:600}
     .vtitle{font-size:14px;font-weight:700;fill:#333}
     .info{font-size:12px;fill:#444}
   </style>
   <rect x="1" y="1" width="${totalW - 2}" height="${totalH - 2}" fill="#fff" stroke="#999"/>
-  ${renderView(parts, b, 'front', frontX, frontY, scale)}
-  ${renderView(parts, b, 'side', sideX, frontY, scale)}
-  ${renderView(parts, b, 'top', frontX, topY, scale)}
+  ${renderView(parts, b, dims, 'front', frontX, frontY, scale)}
+  ${renderView(parts, b, dims, 'side', sideX, frontY, scale)}
+  ${renderView(parts, b, dims, 'top', frontX, topY, scale)}
   <g transform="translate(${sideX}, ${topY})">
     <rect x="0" y="-20" width="${cell.w}" height="150" fill="#f7f7f5" stroke="#bbb"/>
     <text x="14" y="8" font-size="16" font-weight="700" fill="#222">${esc(title)}</text>
     <text class="info" x="14" y="32">${esc(subtitle)}</text>
-    <text class="info" x="14" y="54">전체 크기: 폭 ${b.size[0]} x 깊이 ${b.size[2]} x 높이 ${b.size[1]} mm</text>
-    <text class="info" x="14" y="76">부품 ${parts.length}개 · 축척 약 1:${ratio} · 단위 mm</text>
+    <text class="info" x="14" y="54">전체 크기: 폭 ${dims.size[0]} x 깊이 ${dims.size[2]} x 높이 ${dims.size[1]} mm</text>
+    <text class="info" x="14" y="76">부품 ${realCount}개 · 축척 약 1:${ratio} · 단위 mm${realCount < parts.length ? ' · 점선은 참고용(만들지 않음)' : ''}</text>
     <text class="info" x="14" y="98">부품별 치수는 재단표를 보세요.</text>
     <text class="info" x="14" y="120">뚝딱설계 · 참고용 도면, 실제 자재에 맞춰 확인하세요</text>
   </g>

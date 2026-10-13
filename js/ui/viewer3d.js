@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MATERIALS, materialProfile, longAxis } from '../core/materials.js';
+import { hasRot, rotOf, isRef } from '../core/model.js';
 
 const S = 0.001; // mm -> m
 const SNAP = 10; // mm
@@ -218,15 +219,22 @@ export class Viewer {
         side: p.shape === 'cylinder' || p.shape === 'barrel' ? THREE.DoubleSide : THREE.FrontSide
       });
       const mesh = new THREE.Mesh(geo, mat);
+      // 참고용 부품(만들지 않음): 흐리게, 그림자·선 없이, 클릭 안 됨
+      const ref = isRef(p);
+      if (ref) { mat.transparent = true; mat.opacity = 0.35; mat.depthWrite = false; mesh.userData.ref = true; }
       mesh.position.set(p.pos[0] * S, p.pos[1] * S, p.pos[2] * S);
-      mesh.castShadow = true;
+      // 기울인 부품 (도를 라디안으로, three.js 기본 순서 XYZ 라 도면 계산과 같다)
+      if (hasRot(p)) mesh.rotation.set(...rotOf(p).map(v => (v * Math.PI) / 180));
+      mesh.castShadow = !ref;
       mesh.receiveShadow = true;
       mesh.userData.id = p.id;
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(geo, 30),
-        new THREE.LineBasicMaterial({ color: sel ? '#d35400' : '#2b2b2b', transparent: true, opacity: sel ? 1 : 0.55 })
-      );
-      mesh.add(edges);
+      if (!ref) {
+        const edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(geo, 30),
+          new THREE.LineBasicMaterial({ color: sel ? '#d35400' : '#2b2b2b', transparent: true, opacity: sel ? 1 : 0.55 })
+        );
+        mesh.add(edges);
+      }
       this.group.add(mesh);
       this.meshes.set(p.id, mesh);
     }
@@ -234,8 +242,12 @@ export class Viewer {
     this.requestRender();
   }
 
+  // 카메라 맞춤은 참고용(트럭 같은 주변 모양)을 빼고 진짜 부품 기준
   bounds() {
-    const box = new THREE.Box3().setFromObject(this.group);
+    const all = [...this.meshes.values()];
+    const real = all.filter(m => !m.userData.ref);
+    const box = new THREE.Box3();
+    for (const m of (real.length ? real : all)) box.expandByObject(m);
     if (box.isEmpty()) box.set(new THREE.Vector3(-0.3, 0, -0.3), new THREE.Vector3(0.3, 0.6, 0.3));
     return box;
   }
@@ -270,7 +282,7 @@ export class Viewer {
     const r = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    return this.raycaster.intersectObjects([...this.meshes.values()], false)[0] || null;
+    return this.raycaster.intersectObjects([...this.meshes.values()].filter(m => !m.userData.ref), false)[0] || null;
   }
 
   rayOnPlane(e, plane) {

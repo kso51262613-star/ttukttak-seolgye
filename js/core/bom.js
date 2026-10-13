@@ -71,14 +71,22 @@ export function buildBom(design, parts, cut, template, priceOverrides = {}) {
     return m?.group === 'metal' && m.kind !== 'item' && m.paint !== false && !p.noPaint;
   }).reduce((s, p) => s + area(p), 0);
   if (hasWood) {
-    finish.push({ name: '오일스테인 또는 수성 바니쉬', qty: Math.max(1, Math.ceil(woodArea * 2 / 10)), unit: 'L', price: 6000 });
+    const liters = Math.max(1, Math.ceil(woodArea * 2 / 10));
+    // 정원·야외 작품은 비바람에 견디는 외부용 오일스테인 (국산 3.5L 약 3만 원, 2026-10 조사)
+    finish.push(template?.category === 'outdoor'
+      ? { name: '외부용 오일스테인', qty: liters, unit: 'L', price: 8500 }
+      : { name: '오일스테인 또는 수성 바니쉬', qty: liters, unit: 'L', price: 6000 });
     finish.push({ name: '사포 세트(120·220방)', qty: 1, unit: '세트', price: 3000 });
   }
   if (hasMetal) {
-    const fire = template?.category === 'fire';
-    finish.push(fire
-      ? { name: '내열 페인트 스프레이(600도)', qty: Math.max(1, Math.ceil(metalArea / 1.5)), unit: '캔', price: 8000 }
-      : { name: '락카 스프레이(무광)', qty: Math.max(1, Math.ceil(metalArea / 1.5)), unit: '캔', price: 4000 });
+    // 화로는 내열, 정원·야외 작품은 녹 막는 방청, 그 밖에는 락카
+    const cans = Math.max(1, Math.ceil(metalArea / 1.5));
+    const cat = template?.category;
+    finish.push(cat === 'fire'
+      ? { name: '내열 페인트 스프레이(600도)', qty: cans, unit: '캔', price: 8000 }
+      : cat === 'outdoor'
+        ? { name: '방청 페인트 스프레이(야외용)', qty: cans, unit: '캔', price: 6000 }
+        : { name: '락카 스프레이(무광)', qty: cans, unit: '캔', price: 4000 });
     finish.push({ name: '탈지제(신너)', qty: 1, unit: '통', price: 4000 });
   }
   const finishItems = priced('fin', finish);

@@ -92,7 +92,8 @@ export function cutList(parts, priceOverrides = {}) {
 
   for (const p of parts) {
     const m = MATERIALS[p.material];
-    if (!m) continue;
+    // 참고용 부품은 만들지 않으므로 재단표에 없다
+    if (!m || m.kind === 'ref') continue;
     const d = partCutDims(p);
     let label;
     if (BULK_KINDS.has(m.kind)) {
@@ -108,6 +109,10 @@ export function cutList(parts, priceOverrides = {}) {
     } else if (d.length) {
       label = `${d.length}`;
       (linearCuts[p.material] ||= []).push({ len: d.length, name: p.name });
+      // 길이 자재인데 조각의 단면이 자재 단면보다 넓으면 그 자재로는 못 만든다 (예: 평철 40 으로 80 높이 판)
+      const dims = [...p.size].sort((a, b) => b - a);
+      const secMax = Math.max(...(m.section || [0]));
+      if (dims[1] > secMax + 0.5) warnings.push(`'${p.name}' 단면 ${Math.round(dims[1])}x${Math.round(dims[2])}mm 는 ${m.name} 단면(${(m.section || []).join('x')})보다 커요. 더 넓은 자재를 쓰거나 두 장을 이어 붙이세요.`);
     } else {
       label = `${d.w} x ${d.h}`;
       (sheetPieces[p.material] ||= []).push({ w: d.w, h: d.h, name: p.name });

@@ -9,6 +9,7 @@ export const MATERIALS = {
   spf_1x4:       { name: '구조목 1x4', kind: 'lumber', group: 'wood', section: [19, 89], stock: 3600, price: 5000, unit: '본', color: '#e9cc9c' },
   treated_2x4:   { name: '방부목 2x4', kind: 'lumber', group: 'wood', section: [38, 89], stock: 3600, price: 13000, unit: '본', color: '#b59366' },
   treated_2x6:   { name: '방부목 2x6', kind: 'lumber', group: 'wood', section: [38, 140], stock: 3600, price: 20000, unit: '본', color: '#a98a5f' },
+  treated_90:    { name: '방부목 각재 90x90', kind: 'lumber', group: 'wood', section: [90, 90], stock: 3600, price: 28000, unit: '본', color: '#9c7a52' },
   slat_30:       { name: '소나무 각재 30x30', kind: 'lumber', group: 'wood', section: [30, 30], stock: 2400, price: 3000, unit: '본', color: '#dcb582' },
   pine_board_18: { name: '집성목 18T', kind: 'sheet', group: 'wood', thickness: 18, stock: [2440, 1220], price: 65000, unit: '장', color: '#d9ad72' },
   pine_board_24: { name: '집성목 24T', kind: 'sheet', group: 'wood', thickness: 24, stock: [2440, 1220], price: 90000, unit: '장', color: '#c99a5e' },
@@ -18,6 +19,8 @@ export const MATERIALS = {
   sq_tube_30:    { name: '각파이프 30x30 1.6T', kind: 'tube', group: 'metal', section: [30, 30], stock: 6000, price: 18900, unit: '본', color: '#40454d' },
   sq_tube_40:    { name: '각파이프 40x40 1.6T', kind: 'tube', group: 'metal', section: [40, 40], stock: 6000, price: 25470, unit: '본', color: '#3b4048' },
   flat_bar_40:   { name: '평철 40x4', kind: 'flat', group: 'metal', section: [4, 40], stock: 6000, price: 8000, unit: '본', color: '#50555d' },
+  // 픽업 랙 덮개 키퍼 세로판과 다리 볼트 탭 (단가는 추정, 2026-10-12)
+  flat_bar_75:   { name: '평철 75x6', kind: 'flat', group: 'metal', section: [6, 75], stock: 6000, price: 18000, unit: '본', color: '#4c5159', kgPerM: 3.53 },
   steel_plate_32:{ name: '철판 3.2T (흑판)', kind: 'sheet', group: 'metal', thickness: 3.2, stock: [2438, 1219], price: 90000, unit: '장', color: '#7d838b' },
   steel_plate_16:{ name: '철판 1.6T (흑판)', kind: 'sheet', group: 'metal', thickness: 1.6, stock: [2438, 1219], price: 50000, unit: '장', color: '#868c94' },
   drum_200:      { name: '드럼통 200L (중고)', kind: 'item', group: 'metal', price: 20000, unit: '개', color: '#6b3a2a' },
@@ -34,6 +37,10 @@ export const MATERIALS = {
   // 2026-10-07 벽돌 화덕용 (docs/research/2026-10-07-화덕자재-단가.md)
   // kind: masonry(벽돌, 부피로 장 수), cast(콘크리트·미장, 부피로 포대), wrap(단열 담요, 면적으로 롤)
   sq_tube_50:    { name: '각파이프 50x50 2.3T', kind: 'tube', group: 'metal', section: [50, 50], stock: 6000, price: 23000, unit: '본', color: '#363b43', kgPerM: 3.45 },
+  // 해먹 거치대 연결쇠: 안쪽 약 93.6mm 라 각재 90x90 이 들어간다
+  sq_tube_100:   { name: '각파이프 100x100 3.2T', kind: 'tube', group: 'metal', section: [100, 100], stock: 6000, price: 100000, unit: '본', color: '#2b2f35', kgPerM: 9.52 },
+  // 만들지 않는 참고용 부품 (트럭 적재함처럼 주변 모양). 재단표·비용·무게에 안 들어간다
+  ref_truck:     { name: '참고용 (만들지 않음)', kind: 'ref', group: 'ref', price: 0, unit: '개', color: '#b9bec4' },
   stainless_pipe_125: { name: '스테인리스 연통 125 (1m)', kind: 'tube', profile: 'round', group: 'metal', section: [125, 125], stock: 1000, price: 25000, unit: '본', color: '#c9ccd1', kgPerM: 1.55, paint: false },
   caster_150:    { name: '중량 캐스터 150mm 브레이크 (720kg급)', kind: 'item', group: 'metal', price: 80000, unit: '개', color: '#2b2b2b', itemKg: 1.5, desc: '완제품 바퀴 1개 (shape wheel, size [40, 150, 150])' },
   red_brick:     { name: '적벽돌 190x90x57', kind: 'masonry', group: 'masonry', brick: [190, 90, 57], joint: 10, price: 800, unit: '장', color: '#b5523b', density: 1800, mortar: { name: '조적용 레미탈 40kg', per: 80, price: 6000 } },
@@ -46,7 +53,7 @@ export const MATERIALS = {
 // 무게 계산용: density(kg/㎥) 또는 kgPerM(1m 무게) 또는 itemKg(1개 무게). 목재 밀도는 건조재 기준 추정
 const WEIGHT_INFO = {
   spf_2x4: { density: 450 }, spf_2x2: { density: 450 }, spf_1x4: { density: 450 },
-  treated_2x4: { density: 550 }, treated_2x6: { density: 550 }, slat_30: { density: 500 },
+  treated_2x4: { density: 550 }, treated_2x6: { density: 550 }, treated_90: { density: 550 }, slat_30: { density: 500 },
   pine_board_18: { density: 500 }, pine_board_24: { density: 500 }, birch_ply_18: { density: 650 },
   sq_tube_20: { kgPerM: 0.82 }, sq_tube_25: { kgPerM: 1.04 }, sq_tube_30: { kgPerM: 1.43 }, sq_tube_40: { kgPerM: 1.93 },
   flat_bar_40: { kgPerM: 1.26 }, steel_plate_32: { density: 7850 }, steel_plate_16: { density: 7850 },

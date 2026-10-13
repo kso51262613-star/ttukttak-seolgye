@@ -35,7 +35,7 @@ function compactPrevious(prev) {
   return {
     title: prev.title,
     analysis: prev.analysis,
-    parts: (prev.parts || []).map(p => ({ name: p.name, material: p.material, size: p.size, pos: p.pos, note: p.note || '', shape: p.shape || 'box', wall: p.wall || 0 }))
+    parts: (prev.parts || []).map(p => ({ name: p.name, material: p.material, size: p.size, pos: p.pos, note: p.note || '', shape: p.shape || 'box', wall: p.wall || 0, ...(p.rot ? { rot: p.rot } : {}) }))
   };
 }
 

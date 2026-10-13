@@ -78,8 +78,10 @@ function consume(state, re, fn) {
 export function resolveLength(h, param) {
   if (h.unit) return toMM(h.v, h.unit);
   const v = Number(h.v);
-  if (v >= 300 || !param) return toMM(v, '');
+  if (!param) return toMM(v, '');
   const fits = x => x >= param.min && x <= param.max;
+  // 300 이상은 mm 로 본다. 다만 범위에 안 맞고 cm 로 보면 맞으면 cm (예: 해먹 거치대 길이 450 = 4.5m)
+  if (v >= 300) return !fits(Math.round(v)) && fits(Math.round(v * 10)) ? Math.round(v * 10) : toMM(v, '');
   if (v <= 5 && fits(Math.round(v * 1000))) return Math.round(v * 1000);
   if (fits(Math.round(v * 10))) return Math.round(v * 10);
   if (fits(Math.round(v))) return Math.round(v);
@@ -124,7 +126,13 @@ export function parseText(input) {
   let tiers;
   consume(state, /(\d+)\s*(?:단|층|칸)/g, m => { tiers ??= Number(m[1]); });
   for (const [key, label] of LABELS) {
-    consume(state, new RegExp(`${label}\\s*[:=]?\\s*(?:은|는|이|가)?\\s*${NUM}${UNIT}`, 'gi'), m => put(key, m[1], m[2]));
+    consume(state, new RegExp(`${label}\\s*[:=]?\\s*(?:은|는|이|가)?\\s*${NUM}${UNIT}`, 'gi'), m => {
+      // "길이 5m 폭 1.5m" 처럼 폭·길이 말이 두 번 나오면 두 번째 값도 받아 두고, 어느 말(길이인지)로 말했는지 기억한다
+      const h = { v: Number(m[1]), unit: m[2] || '', len: /길이|length/i.test(m[0]) };
+      if (key !== 'width') put(key, m[1], m[2]);
+      else if (!hints.width) hints.width = h;
+      else hints.width2 ??= h;
+    });
   }
   consume(state, new RegExp(`${NUM}${UNIT}\\s*[x×*]\\s*${NUM}${UNIT}`, 'gi'), m => {
     const unit = m[4] || m[2] || '';
@@ -141,6 +149,22 @@ export function parseText(input) {
   }
 
   understood.push(`종류: ${best.name}`);
+  // 폭·길이를 둘 다 말했으면 "길이"라고 한 쪽이 길이(width) 칸, 다른 쪽이 깊이 칸.
+  // 단, 그렇게 넣었을 때 둘 다 작품 범위에 맞을 때만 ("다리 길이 40" 처럼 다른 말의 길이가 끼면 틀어짐). 아니면 큰 값이 길이
+  if (hints.width2 && best.params.some(p => p.key === 'depth') && !hints.depth) {
+    const a = hints.width;
+    const c = hints.width2;
+    const pk = Object.fromEntries(best.params.map(p => [p.key, p]));
+    const fits = (h, key) => { const v = resolveLength(h, pk[key]); return v >= pk[key].min && v <= pk[key].max; };
+    const guess = h => (h.unit ? toMM(h.v, h.unit) : Number(h.v));
+    // 폭 칸 이름이 "길이"인 작품(해먹 거치대, 픽업 랙)은 "길이"라고 한 값이 폭 칸, 그 밖에는 "폭"이라고 한 값이 폭 칸
+    const lengthIsWidth = /길이/.test(pk.width?.label || '');
+    let [len, wid] = a.len !== c.len ? ((a.len === lengthIsWidth) ? [a, c] : [c, a]) : [null, null];
+    if (!len || !(fits(len, 'width') && fits(wid, 'depth'))) [len, wid] = guess(a) >= guess(c) ? [a, c] : [c, a];
+    hints.width = len;
+    hints.depth = wid;
+    delete hints.width2;
+  }
   const params = defaultParams(best);
   const byKey = Object.fromEntries(best.params.map(p => [p.key, p]));
   const lengths = Object.fromEntries(Object.entries(hints).map(([k, h]) => [k, resolveLength(h, byKey[k])]));
@@ -182,7 +206,7 @@ export function parseText(input) {
 }
 
 function labelOf(k) {
-  return { width: '폭', depth: '깊이', height: '높이', hole: '구멍', tiers: '단 수', boxDepth: '수납칸 깊이' }[k] || k;
+  return { width: '폭', width2: '두 번째 폭·길이', depth: '깊이', height: '높이', hole: '구멍', tiers: '단 수', boxDepth: '수납칸 깊이' }[k] || k;
 }
 
 export { getTemplate };

@@ -4,7 +4,7 @@ import { renderTab, TABS, esc, won } from './ui/tabs.js';
 import { renderLeft, renderRight, partFromForm } from './ui/sidebar.js';
 import { getTemplate, MARKET_PRICES, MARKET_NOTES } from './core/templates/index.js';
 import { MATERIALS } from './core/materials.js';
-import { newDesign, buildParts, bounds, makeId } from './core/model.js';
+import { newDesign, buildParts, bounds, makeId, liftToFloor, keepLowest, rotOf, hasRot, isRef } from './core/model.js';
 import { cutList } from './core/cutlist.js';
 import { buildBom } from './core/bom.js';
 import { buildSteps, buildListing, suggestPrice } from './core/listing.js';
@@ -60,8 +60,9 @@ const viewer = new Viewer($('#viewer'), {
 function renderViewer(refit = false) {
   viewer.setParts(derived.parts, selectedId, { refit });
   const b = bounds(derived.parts);
-  $('#stats').textContent = derived.parts.length
-    ? `${b.size[0]} x ${b.size[2]} x ${b.size[1]} mm · 부품 ${derived.parts.length}개 · 재료비 약 ${won(Math.round(derived.bom.usedTotal / 100) * 100)} (자재 통째로 ${won(derived.bom.total)})`
+  const realCount = derived.parts.filter(p => !isRef(p)).length;
+  $('#stats').textContent = realCount
+    ? `${b.size[0]} x ${b.size[2]} x ${b.size[1]} mm · 부품 ${realCount}개 · 재료비 약 ${won(Math.round(derived.bom.usedTotal / 100) * 100)} (자재 통째로 ${won(derived.bom.total)})`
     : '부품이 없어요';
   const refs = cleanRefImages(design.refImages);
   const strip = $('#refStrip');
@@ -155,9 +156,9 @@ function moveBy(id, delta) {
   const cur = design.moved[id] || [0, 0, 0];
   design.moved[id] = cur.map((v, i) => v + delta[i]);
 }
+// 크기를 바꿔도 가장 낮은 곳을 그대로 둔다 (기울인 부품도 꼭짓점 기준)
 function keepBottom(ep, oldSize) {
-  const bottom = ep.pos[1] - oldSize[1] / 2;
-  ep.pos[1] = bottom + ep.size[1] / 2;
+  keepLowest(ep, { size: oldSize, rot: ep.rot });
 }
 function removeSelected() {
   if (!selectedId) return;
@@ -356,7 +357,7 @@ function openSettings({ guide = false } = {}) {
   $('#keyGuide').open = guide || !settings.apiKey;
   const u = usageThisMonth(store.getAiUsage());
   $('#aiUsageLine').textContent = `이번 달 이 기기에서 AI 사용: 약 ${won(u.krw)} (${u.count}번). 참고값이라 실제 청구 금액은 클로드 콘솔에서 확인하세요.`;
-  $('#priceTable').innerHTML = Object.entries(MATERIALS).map(([k, m]) => `<label><span>${esc(m.name)} <small>/${m.unit}</small></span>
+  $('#priceTable').innerHTML = Object.entries(MATERIALS).filter(([, m]) => m.kind !== 'ref').map(([k, m]) => `<label><span>${esc(m.name)} <small>/${m.unit}</small></span>
     <input type="number" min="0" step="any" data-price="${k}" value="${esc(String(settings.priceOverrides?.[k] ?? m.price))}"></label>`).join('');
   $('#settings').showModal();
 }
@@ -510,6 +511,7 @@ document.addEventListener('click', async e => {
       const ep = findExtra(selectedId);
       if (!ep) break;
       if (FIXED_SHAPES.has(ep.shape)) { toast('아치·바퀴·원기둥 부품은 돌릴 수 없어요. 크기와 위치만 바꿀 수 있어요.'); break; }
+      if (hasRot(ep)) { toast('기울인 부품은 90도 돌리기 대신 기울기 칸을 써 주세요.'); break; }
       mutate(() => {
         const old = [...ep.size];
         if (t.dataset.axis === 'y') [ep.size[0], ep.size[2]] = [ep.size[2], ep.size[0]];
@@ -611,7 +613,20 @@ document.addEventListener('change', e => {
     }); break;
     case 'part-pos': {
       const ep = findExtra(selectedId);
-      if (ep) mutate(() => { ep.pos[i] = Number(t.value) || 0; if (i === 1) ep.pos[1] = Math.max(ep.size[1] / 2, ep.pos[1]); });
+      // 바닥 아래로는 못 내려가게 (기울인 부품은 가장 낮은 꼭짓점 기준)
+      if (ep) mutate(() => { ep.pos[i] = Number(t.value) || 0; liftToFloor(ep); });
+      break;
+    }
+    case 'part-rot': {
+      const ep = findExtra(selectedId);
+      if (ep) mutate(() => {
+        const oldRot = ep.rot;
+        const rot = rotOf(ep);
+        rot[i] = Math.max(-90, Math.min(90, Number(t.value) || 0));
+        if (rot.some(v => v)) ep.rot = rot; else delete ep.rot;
+        // 기울이기 전 가장 낮은 곳을 그대로 (바닥에 있던 부품은 바닥에 그대로)
+        keepLowest(ep, { size: ep.size, rot: oldRot });
+      });
       break;
     }
     case 'part-size': {

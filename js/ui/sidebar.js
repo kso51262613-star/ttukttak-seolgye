@@ -4,13 +4,15 @@ import { MATERIALS, isLinear } from '../core/materials.js';
 import { esc } from './tabs.js';
 import { isSafeUrl } from '../core/storage.js';
 import { cleanRefImages } from '../core/vision.js';
+import { hasRot } from '../core/model.js';
 
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 const SLOT_LABELS = {
   frame: '틀', top: '상판', board: '선반 판', body: '몸통 판', slat: '살', leg: '다리',
   apron: '띠장', post: '기둥', plate: '철판', body_drum: '몸통',
-  panel: '옆판', bottom: '수납칸 바닥', strap: '받침', shelf: '장작 선반'
+  panel: '옆판', bottom: '수납칸 바닥', strap: '받침', shelf: '장작 선반',
+  hub: '연결쇠', inner: '다리 속대', keeper: '덮개 키퍼·볼트 탭', lip: '덮개 윗날', ref: '참고용'
 };
 
 const dots = n => '●'.repeat(n) + '○'.repeat(3 - n);
@@ -58,7 +60,7 @@ function paramRow(p, raw) {
 }
 
 function addPartForm() {
-  const opts = Object.entries(MATERIALS).map(([k, m]) => `<option value="${k}">${esc(m.name)}</option>`).join('');
+  const opts = Object.entries(MATERIALS).filter(([, m]) => m.kind !== 'ref').map(([k, m]) => `<option value="${k}">${esc(m.name)}</option>`).join('');
   return `<details class="add-part"><summary>+ 부품 직접 추가</summary>
     <form data-act="add-part">
       <label>자재<select name="material">${opts}</select></label>
@@ -68,18 +70,27 @@ function addPartForm() {
       <button type="submit">추가</button></form></details>`;
 }
 
+// 기울기 글자: 앞에서 볼 때(z), 옆에서 볼 때(x), 위에서 볼 때(y)
+function rotText(rot) {
+  const names = [[2, '앞에서 볼 때'], [0, '옆에서 볼 때'], [1, '위에서 볼 때']];
+  return names.filter(([i]) => Number(rot?.[i])).map(([i, l]) => `${l} ${Math.abs(Math.round(Number(rot[i])))}도`).join(', ');
+}
+
 function selectedPanel(part, design) {
   if (!part) return '<p class="hint">3D에서 부품을 누르면 여기서 고칠 수 있어요. 선택한 부품은 끌어서 옮기고, Shift를 누른 채 끌면 위아래로 움직여요.</p>';
   const moved = design.moved?.[part.id];
   const sizeInputs = part.extra
     ? `<div class="xyz">${['폭', '높이', '깊이'].map((l, i) => `<label>${l}<input type="number" min="1" value="${num(part.size[i])}" data-act="part-size" data-i="${i}"></label>`).join('')}</div>
-       ${['barrel', 'wheel', 'caster', 'cylinder'].includes(part.shape) ? '' : '<div class="row-btns"><button data-act="rotate" data-axis="y">눕혀 돌리기 90°</button><button data-act="rotate" data-axis="x">세우기 90°</button></div>'}`
+       ${['barrel', 'wheel', 'caster', 'cylinder'].includes(part.shape) || hasRot(part) ? '' : '<div class="row-btns"><button data-act="rotate" data-axis="y">눕혀 돌리기 90°</button><button data-act="rotate" data-axis="x">세우기 90°</button></div>'}`
     : `<p class="dims">${part.size.map(v => Math.round(v)).join(' x ')} mm</p>`;
   return `<div class="sel"><h4>${esc(part.name)} <small>${esc(MATERIALS[part.material]?.name)}</small></h4>
     ${sizeInputs}
     ${part.extra
       ? `<div class="xyz">${['좌우', '위아래', '앞뒤'].map((l, i) => `<label>${l} 위치<input type="number" step="10" value="${Math.round(part.pos[i])}" data-act="part-pos" data-i="${i}"></label>`).join('')}</div>`
       : `<div class="xyz">${['좌우', '위아래', '앞뒤'].map((l, i) => `<label>${l} 이동<input type="number" step="10" value="${num(moved?.[i])}" data-act="part-move" data-i="${i}"></label>`).join('')}</div>`}
+    ${part.extra && !['wheel', 'caster', 'barrel'].includes(part.shape)
+      ? `<div class="xyz">${[['앞에서 본 기울기(도)', 2], ['옆에서 본 기울기(도)', 0], ['위에서 본 기울기(도)', 1]].map(([l, i]) => `<label>${l}<input type="number" min="-90" max="90" step="5" value="${num(part.rot?.[i])}" data-act="part-rot" data-i="${i}"></label>`).join('')}</div>`
+      : rotText(part.rot) ? `<p class="dims">기울기: ${rotText(part.rot)}</p>` : ''}
     ${part.note ? `<p class="dims">메모: ${esc(part.note)}</p>` : ''}
     <div class="row-btns">${moved ? '<button data-act="reset-move">위치 원래대로</button>' : ''}<button class="danger" data-act="remove-part">이 부품 빼기</button></div></div>`;
 }

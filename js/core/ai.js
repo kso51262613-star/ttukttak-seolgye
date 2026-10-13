@@ -4,6 +4,7 @@ import { MATERIALS } from './materials.js';
 import { DESIGN_SCHEMA, VISION_SCHEMA, TEMPLATE_IDS, textSystemPrompt, visionSystemPrompt } from './prompts.js';
 import { buildVisionContent } from './vision.js';
 import { costKrw } from './aiCost.js';
+import { partBox, isRef } from './model.js';
 
 export const AI_MODEL = 'claude-opus-5-5';
 // 버전을 고정해 둔다. 올릴 때는 tests/ai.test.js 와 브라우저에서 한 번 확인할 것
@@ -34,6 +35,10 @@ export function validateAIResult(obj) {
     if (shape === 'wheel') { const d = Math.max(size[1], size[2]); size[1] = d; size[2] = d; }
     if (shape === 'cylinder' && p.material !== 'drum_200' && Math.abs(size[0] - size[2]) > 0.05 * Math.max(size[0], size[2])) shape = 'box';
     const wall = shape === 'barrel' && Number(p.wall) > 0 && Number(p.wall) < size[0] / 2 ? Math.round(Number(p.wall) * 10) / 10 : undefined;
+    // 기울기 (도). 세 숫자가 모두 -90~90 일 때만, 기울지 않았으면 넣지 않는다
+    const rounded = Array.isArray(p.rot) && p.rot.length === 3 && p.rot.every(v => Number.isFinite(v) && Math.abs(v) <= 90)
+      ? p.rot.map(v => Math.round(v * 10) / 10) : null;
+    const rot = rounded && rounded.some(v => v !== 0) ? rounded : undefined;
     parts.push({
       id: `ai-${name}-${counts[name]}`,
       name,
@@ -42,12 +47,14 @@ export function validateAIResult(obj) {
       pos: [...p.pos],
       shape,
       ...(wall ? { wall } : {}),
+      ...(rot ? { rot } : {}),
       note: String(p.note || '')
     });
   }
   if (!parts.length) throw new Error('AI가 쓸 수 있는 부품을 만들지 못했어요. 설명을 조금 더 구체적으로 써 주세요.');
-  // 바닥 아래로 내려간 만큼 전체를 들어 올린다
-  const minY = Math.min(...parts.map(p => p.pos[1] - p.size[1] / 2));
+  if (!parts.some(p => !isRef(p))) throw new Error('참고용 부품만 있어요. 만들 부품을 하나 이상 넣어 주세요.');
+  // 바닥 아래로 내려간 만큼 전체를 들어 올린다 (기울인 부품은 가장 낮은 꼭짓점 기준)
+  const minY = Math.min(...parts.map(p => partBox(p).min[1]));
   if (minY < 0) parts.forEach(p => { p.pos[1] -= minY; });
   return {
     title: String(obj.title || 'AI 설계').slice(0, 40),

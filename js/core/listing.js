@@ -1,6 +1,6 @@
 // 제작 순서와 당근 판매글 초안
 import { MATERIALS } from './materials.js';
-import { bounds, clampParams, resolveMaterials } from './model.js';
+import { bounds, clampParams, resolveMaterials, isRef } from './model.js';
 
 export function suggestPrice(cost, hours, rate) {
   const v = (Number(cost) || 0) + (Number(hours) || 0) * (Number(rate) || 0);
@@ -17,7 +17,9 @@ export function buildSteps(design, template) {
 const won = n => `${Number(n).toLocaleString('ko-KR')}원`;
 const cm = mm => Math.round(mm / 10);
 
-export function buildListing({ design, template, parts, bom, price, weight }) {
+export function buildListing({ design, template, parts: allParts, bom, price, weight }) {
+  // 참고용 부품은 판매글에 안 넣는다
+  const parts = allParts.filter(p => !isRef(p));
   const [w, h, d] = bounds(parts).size;
   const name = design.title || template?.name || '수제 가구';
   const mats = [...new Set(parts.map(p => MATERIALS[p.material]?.name).filter(Boolean))];

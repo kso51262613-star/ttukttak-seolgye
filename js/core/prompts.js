@@ -2,7 +2,8 @@
 import { MATERIALS } from './materials.js';
 import { TEMPLATES } from './templates/index.js';
 
-export const MATERIAL_KEYS = Object.keys(MATERIALS);
+// 참고용 자재는 AI 가 고르지 못하게 뺀다
+export const MATERIAL_KEYS = Object.keys(MATERIALS).filter(k => MATERIALS[k].kind !== 'ref');
 export const TEMPLATE_IDS = TEMPLATES.filter(t => t.id !== 'custom').map(t => t.id);
 
 export const DESIGN_SCHEMA = {
