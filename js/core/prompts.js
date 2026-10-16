@@ -6,6 +6,15 @@ import { TEMPLATES } from './templates/index.js';
 export const MATERIAL_KEYS = Object.keys(MATERIALS).filter(k => MATERIALS[k].kind !== 'ref');
 export const TEMPLATE_IDS = TEMPLATES.filter(t => t.id !== 'custom').map(t => t.id);
 
+// 템플릿 자재 칸의 한글 이름 (오른쪽 패널, 고치기 줄, AI 고치기 규칙에서 같이 쓴다)
+export const SLOT_LABELS = {
+  frame: '틀', top: '상판', board: '선반 판', body: '몸통 판', slat: '살', leg: '다리',
+  apron: '띠장', post: '기둥', plate: '철판', body_drum: '몸통',
+  panel: '옆판', bottom: '수납칸 바닥', strap: '받침', shelf: '장작 선반',
+  hub: '연결쇠', inner: '다리 속대', keeper: '덮개 키퍼·볼트 탭', lip: '덮개 윗날', ref: '참고용'
+};
+export const slotLabel = slot => (typeof slot === 'string' && Object.hasOwn(SLOT_LABELS, slot) ? SLOT_LABELS[slot] : String(slot ?? ''));
+
 export const DESIGN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -54,6 +63,24 @@ export const VISION_SCHEMA = {
   }
 };
 
+// "이 설계 고치기" AI 답 모양: 지금 설계에 대한 고치기 목록. 쓰지 않는 칸은 빈 값.
+// mode 'rebuild' 는 템플릿으로 안 되는 큰 변경일 때 전체 설계(DESIGN_SCHEMA 모양)를 rebuild 에 담는다
+const strictObject = properties => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties });
+export const EDIT_SCHEMA = strictObject({
+  mode: { type: 'string', enum: ['edit', 'rebuild'] },
+  params: { type: 'array', items: strictObject({ key: { type: 'string' }, value: { type: 'number' } }) },
+  materials: { type: 'array', items: strictObject({ slot: { type: 'string' }, material: { type: 'string', enum: MATERIAL_KEYS } }) },
+  remove: { type: 'array', items: { type: 'string' } },
+  move: { type: 'array', items: strictObject({ id: { type: 'string' }, dx: { type: 'number' }, dy: { type: 'number' }, dz: { type: 'number' } }) },
+  rename: { type: 'array', items: strictObject({ id: { type: 'string' }, name: { type: 'string' } }) },
+  note: { type: 'array', items: strictObject({ id: { type: 'string' }, note: { type: 'string' } }) },
+  add: { type: 'array', items: DESIGN_SCHEMA.properties.parts.items },
+  rebuild: DESIGN_SCHEMA,
+  title: { type: 'string' },
+  summary: { type: 'array', items: { type: 'string' } },
+  questions: { type: 'array', items: { type: 'string' } }
+});
+
 export function materialGuide() {
   return MATERIAL_KEYS.map(k => {
     const m = MATERIALS[k];
@@ -84,6 +111,44 @@ const RULES = [
 export function textSystemPrompt() {
   return [
     '당신은 한국의 DIY 목공·철공 설계 도우미입니다. 사용자가 말로 설명한 작품을 실제로 만들 수 있는 부품 목록으로 바꿉니다.',
+    ...RULES,
+    '아래 자재 키만 쓰세요:',
+    materialGuide()
+  ].join('\n');
+}
+
+// "이 설계 고치기" 규칙: 지금 설계의 치수 칸, 고를 수 있는 자재 칸, 부품 목록(참고용 제외)을 보여 주고
+// 새로 만들지 말고 고치기 목록(EDIT_SCHEMA)으로 답하게 한다
+export function editSystemPrompt(template, design = {}, parts = []) {
+  const t = template && template.id !== 'custom' ? template : null;
+  const params = t?.params || [];
+  const cur = design?.params || {};
+  const chosen = design?.materials || {};
+  const slots = Object.entries(t?.materialOptions || {}).filter(([, o]) => o.length > 1);
+  const r = v => Math.round(Number(v) * 10) / 10;
+  const vec = a => `[${(Array.isArray(a) ? a : []).map(r).join(', ')}]`;
+  const real = (Array.isArray(parts) ? parts : []).filter(p => MATERIALS[p?.material] && MATERIALS[p.material].kind !== 'ref');
+  return [
+    '당신은 한국의 DIY 목공·철공 설계 도우미입니다. 지금 열린 설계를 사용자의 말대로 고칩니다. 새로 만들지 말고 아래 고치기 목록(JSON)으로 답합니다.',
+    t ? `작품: ${t.name} (${t.summary})` : '작품: 직접 설계 (템플릿 없음, 치수 슬라이더 없음. 부품 고치기로만 바꿉니다)',
+    `지금 이름: ${design?.title || ''}`,
+    params.length ? '치수 칸 (params 로 바꿈. key: 이름 (최소~최대 단위, step, 지금 값)):' : '치수 칸: 없음',
+    ...params.map(p => `- ${p.key}: ${p.label} (${p.min}~${p.max}${p.unit}, step ${p.step}, 지금 ${cur[p.key] ?? p.default})`),
+    slots.length ? '자재 칸 (materials 로 바꿈. slot(이름): 고를 수 있는 자재 키 (지금 키)):' : '바꿀 수 있는 자재 칸: 없음',
+    ...slots.map(([s, o]) => `- ${s}(${slotLabel(s)}): ${o.join(', ')} (지금 ${o.includes(chosen[s]) ? chosen[s] : o[0]})`),
+    '부품 목록 (id | 이름 | 자재 키 | size [x, y, z] | pos [x, y, z]). extra 는 직접 또는 AI 로 추가한 부품이에요:',
+    ...(real.length ? real.map(p => `- ${p.id} | ${p.name} | ${p.material} | size ${vec(p.size)} | pos ${vec(p.pos)}${p.rot ? ` | rot ${vec(p.rot)}` : ''}${p.extra ? ' | extra' : ''}`) : ['- (부품 없음)']),
+    '고치는 규칙:',
+    '- 치수나 자재로 되는 것은 params, materials 로 고칩니다. 치수는 범위 안에서 step 에 맞춥니다. 치수를 바꾸면 템플릿 부품의 크기와 자리는 앱이 다시 계산합니다.',
+    '- 부품 하나하나를 바꿀 때: remove (뺄 부품 id), move (id 와 옮길 거리 dx, dy, dz, 단위 mm), rename (id, 새 이름), note (id, 가공 메모), add (새 부품).',
+    '- id 는 위 부품 목록에 있는 것만 씁니다. 목록에 없는 부품은 고칠 수 없습니다.',
+    '- 단 수처럼 부품 개수가 바뀌는 치수를 바꿀 때는 같은 답에서 그 부품들의 remove, move 를 쓰지 않습니다 (부품 id 가 달라질 수 있어요).',
+    '- add 부품은 아래 설계 규칙(좌표, 자재 키)을 따르고 이웃 부품과 실제로 맞닿게 놓습니다.',
+    "- 템플릿으로는 도저히 안 되는 큰 변경(구조가 완전히 다른 작품)일 때만 mode 를 'rebuild' 로 하고 rebuild 에 전체 설계(title, parts, steps, hardware)를 넣은 뒤 summary 첫 줄에 이유를 적습니다. 그 밖에는 mode 'edit' 이고 rebuild 는 빈 값(title '', parts [], steps [], hardware [])입니다.",
+    "- title: 작품 이름을 바꿀 때만 새 이름, 아니면 ''.",
+    '- summary: 무엇을 고쳤는지 쉬운 한국어 1~6줄. questions: 하지 못한 것이나 사용자가 확인할 것 0~3줄. 쓰지 않는 칸은 빈 배열로 둡니다.',
+    '- 글에는 줄표(대시)나 화살표 기호를 쓰지 말고 "폭 1200 에서 1500 으로" 처럼 씁니다.',
+    'add 와 rebuild 에 쓰는 설계 규칙 (rebuild 의 title, steps, hardware 포함):',
     ...RULES,
     '아래 자재 키만 쓰세요:',
     materialGuide()

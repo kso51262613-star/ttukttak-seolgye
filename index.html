@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-  <link rel="stylesheet" href="css/style.css?v=8">
+  <link rel="stylesheet" href="css/style.css?v=9">
   <script type="importmap">
   {
     "imports": {
@@ -69,14 +69,14 @@
       <h2>설정</h2>
       <section>
         <h3>AI 도움 (선택)</h3>
-        <p class="note">클로드 API 키가 있으면 📷 사진·영상으로 설계(1회 약 200~400원)와, 말로 설계에서 템플릿을 못 찾았을 때 AI 설계(1회 약 100~300원)를 쓸 수 있어요. 키는 이 기기에만 저장되고, 내보내기 파일에도 들어가지 않아요.</p>
+        <p class="note">클로드 API 키가 있으면 📷 사진·영상으로 설계(1회 약 200~400원), 말로 설계에서 템플릿을 못 찾았을 때 AI 설계(1회 약 100~300원), 오른쪽 "이 설계 고치기"에서 부품 추가·빼기 같은 AI 고치기(1회 약 100~300원)를 쓸 수 있어요. 키는 이 기기에만 저장되고, 내보내기 파일에도 들어가지 않아요.</p>
         <label>API 키 <input type="password" id="apiKey" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="sk-ant-..."></label>
         <div class="row-btns">
           <button type="button" id="keyShow">보기</button>
           <button type="button" id="keyCheck">키 확인 (1원도 안 들어요)</button>
         </div>
         <p class="key-msg" id="keyMsg" role="status" hidden></p>
-        <label class="inline"><input type="checkbox" id="useAI"> 말로 설계에서 템플릿을 못 찾으면 AI로 설계하기 (쓰기 전에 물어봐요)</label>
+        <label class="inline"><input type="checkbox" id="useAI"> 말로 설계와 이 설계 고치기에서 AI 쓰기 (쓰기 전에 물어봐요)</label>
         <p class="note" id="aiUsageLine"></p>
         <details class="key-guide" id="keyGuide">
           <summary>키 만드는 법 (처음 한 번, 10분쯤)</summary>
@@ -144,6 +144,6 @@
   </dialog>
 
   <div class="toast" id="toast" hidden></div>
-  <script type="module" src="js/app.js?v=8"></script>
+  <script type="module" src="js/app.js?v=9"></script>
 </body>
 </html>

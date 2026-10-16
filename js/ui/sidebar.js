@@ -7,14 +7,8 @@ import { cleanRefImages } from '../core/vision.js';
 import { hasRot, isRef } from '../core/model.js';
 import { partNumbers } from '../core/numbering.js';
 import { jointsOfPart, fastenerTotals, describeMethod, describeHoles, TYPE_NAMES } from '../core/joints.js';
+import { slotLabel } from '../core/prompts.js';
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
-
-const SLOT_LABELS = {
-  frame: '틀', top: '상판', board: '선반 판', body: '몸통 판', slat: '살', leg: '다리',
-  apron: '띠장', post: '기둥', plate: '철판', body_drum: '몸통',
-  panel: '옆판', bottom: '수납칸 바닥', strap: '받침', shelf: '장작 선반',
-  hub: '연결쇠', inner: '다리 속대', keeper: '덮개 키퍼·볼트 탭', lip: '덮개 윗날', ref: '참고용'
-};
 
 const dots = n => '●'.repeat(n) + '○'.repeat(3 - n);
 
@@ -219,11 +213,22 @@ export function jointCard(group, joints, { parts = [], numbers = null, design = 
   </div>`;
 }
 
+// ---------- 오른쪽: 이 설계 고치기 ----------
+// 글 칸은 name 만 (data-act 없음). 쓰던 글은 app.js 가 input 때 기억해 두었다가 다시 그릴 때 넣는다 (draft)
+function editForm(draft = '', aiOn = false) {
+  return `<form class="edit-form" data-act="design-edit">
+    <label for="editText">이 설계 고치기</label>
+    <textarea id="editText" name="edit" rows="2" maxlength="500" placeholder="예: 폭 1500, 높이 10cm 더 높게, 방부목으로">${esc(draft)}</textarea>
+    <div class="edit-row"><button type="submit">고치기</button><span class="edit-hint">치수·자재는 무료로, 부품 추가·빼기는 AI 로 ${aiOn ? '(약 100~300원)' : '(키 필요)'}</span></div>
+  </form>`;
+}
+
 // 뺀 부품 줄 글자: id(이름-번호), 이름을 바꾼 부품이면 바꾼 이름도
 const removedLabel = r => (r.name && !String(r.id).startsWith(`${r.name}-`) ? `${r.id} (${r.name})` : String(r.id));
 
 // selectedId: 부품 id 또는 'joint:<묶음 글자>'. removedParts: [{ id, name }] (app.js 가 템플릿을 다시 만들어 찾는다)
-export function renderRight({ design, template, parts = [], joints = [], numbers = null, steps = [], selectedId = null, nudgeStep = 10, removedParts = [], openGroups = null }) {
+// editDraft: 이 설계 고치기 칸에 쓰던 글, aiOn: AI 를 쓸 수 있는지 (설정에서 켜고 키가 있음)
+export function renderRight({ design, template, parts = [], joints = [], numbers = null, steps = [], selectedId = null, nudgeStep = 10, removedParts = [], openGroups = null, editDraft = '', aiOn = false }) {
   const nums = numbers || partNumbers(parts);
   let html = `<label class="title-in">작품 이름<input type="text" value="${esc(design.title)}" data-act="title"></label>`;
   if (template && template.params.length) {
@@ -231,9 +236,10 @@ export function renderRight({ design, template, parts = [], joints = [], numbers
   }
   const slots = Object.entries(template?.materialOptions || {}).filter(([, o]) => o.length > 1);
   if (slots.length) {
-    html += '<h4>자재</h4>' + slots.map(([slot, opts]) => `<label class="mat">${SLOT_LABELS[slot] || slot}
+    html += '<h4>자재</h4>' + slots.map(([slot, opts]) => `<label class="mat">${esc(slotLabel(slot))}
       <select data-act="material" data-slot="${slot}">${opts.map(k => `<option value="${k}" ${(design.materials?.[slot] || opts[0]) === k ? 'selected' : ''}>${esc(MATERIALS[k].name)}</option>`).join('')}</select></label>`).join('');
   }
+  html += editForm(editDraft, aiOn);
   const jointSel = typeof selectedId === 'string' && selectedId.startsWith('joint:') ? selectedId.slice(6) : null;
   const group = jointSel ? joints.filter(j => j.group === jointSel) : [];
   const part = !jointSel && selectedId ? parts.find(p => p.id === selectedId) : null;

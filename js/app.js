@@ -11,8 +11,9 @@ import { cutList } from './core/cutlist.js';
 import { buildBom } from './core/bom.js';
 import { buildSteps, buildListing, suggestPrice } from './core/listing.js';
 import { designJoints, annotateSteps } from './core/joints.js';
-import { parseText } from './core/parser.js';
-import { designWithAI, designFromImages, checkApiKey, cleanKey } from './core/ai.js';
+import { parseText, parseEdit } from './core/parser.js';
+import { designWithAI, designFromImages, editWithAI, checkApiKey, cleanKey } from './core/ai.js';
+import { applyEdit } from './core/edit.js';
 import { addUsage, usageThisMonth } from './core/aiCost.js';
 import { designFromVision, templateDesignFrom, cleanRefImages } from './core/vision.js';
 import { initVisionDialog } from './ui/visionDialog.js';
@@ -39,6 +40,12 @@ let lastVision = null;
 // AI 한 번에 드는 돈 (참고값, 화면 안내용)
 const AI_TEXT_COST = '약 100~300원';
 const AI_PHOTO_COST = '약 200~400원';
+const AI_EDIT_COST = '약 100~300원';
+// 이 설계 고치기: 칸에 쓰던 글(오른쪽 패널을 다시 그려도 남게), 마지막 고치기 { text, applied, designId },
+// AI 가 통째로 다시 설계한 결과(적용 버튼을 기다림)
+let editDraft = '';
+let lastEdit = null;
+let pendingRebuild = null;
 
 // ---------- 계산 ----------
 function compute() {
@@ -156,7 +163,8 @@ function renderRightPanel() {
   commitPanelInput();
   $('#rightBody').innerHTML = renderRight({
     design, template: derived.template, parts: derived.parts, joints: derived.joints, numbers: partNumbers(derived.parts),
-    steps: derived.steps, selectedId, nudgeStep: nudgeStep(), removedParts: removedParts(), openGroups
+    steps: derived.steps, selectedId, nudgeStep: nudgeStep(), removedParts: removedParts(), openGroups,
+    editDraft, aiOn: !!(settings.useAI && settings.apiKey)
   });
 }
 function renderTabs() {
@@ -342,10 +350,10 @@ function editSelectedJoints(fn) {
 }
 
 // ---------- 말로 설계 ----------
-function showUnderstood(lines, unknown = [], candidates = [], extraHtml = '') {
+function showUnderstood(lines, unknown = [], candidates = [], extraHtml = '', title = '이렇게 이해했어요') {
   const el = $('#understood');
   const cands = candidates.map(id => getTemplate(id)).filter(Boolean);
-  el.innerHTML = `<b>이렇게 이해했어요</b><ul>${lines.map(l => `<li>${esc(l)}</li>`).join('')}${unknown.map(u => `<li class="muted">${esc(u)}</li>`).join('')}</ul>
+  el.innerHTML = `<b>${esc(title)}</b><ul>${lines.map(l => `<li>${esc(l)}</li>`).join('')}${unknown.map(u => `<li class="muted">${esc(u)}</li>`).join('')}</ul>
     ${cands.length ? `<div class="cands">혹시 이걸 찾으셨나요? ${cands.map(t => `<button data-act="pick-template" data-id="${t.id}">${esc(t.name)}</button>`).join('')}</div>` : ''}
     ${extraHtml}
     <button class="close" data-act="close-understood" title="닫기">✕</button>`;
@@ -418,12 +426,15 @@ function aiOfferHtml(found) {
   if (!settings.apiKey) return '<div class="ai-offer"><p>AI로 설계하려면 클로드 API 키가 필요해요.</p><button type="button" data-act="open-key-settings">설정 열기 (키 만드는 법)</button></div>';
   return `<div class="ai-offer"><p>AI로 설계할까요? 템플릿에 없는 모양도 부품 목록으로 만들어 줘요.</p><button type="button" class="primary" data-act="ai-design">AI로 설계하기 (${AI_TEXT_COST})</button></div>`;
 }
-// 설정을 바꾸면 화면에 떠 있는 제안도 바로 바꿀 수 있게 자리를 감싸 둔다
-const aiOffer = found => `<div class="ai-offer-slot">${aiOfferHtml(found)}</div>`;
+// 설정을 바꾸면 화면에 떠 있는 제안도 바로 바꿀 수 있게 자리를 감싸 둔다 (data-offer: 말로 설계 ask, 고치기 edit-종류)
+const aiOffer = found => `<div class="ai-offer-slot" data-offer="ask">${aiOfferHtml(found)}</div>`;
 function refreshAiOffer() {
   if (aiBusy) return;
   const slot = document.querySelector('#understood .ai-offer-slot');
-  if (slot && lastAsk) slot.innerHTML = aiOfferHtml(lastAsk.found);
+  if (!slot) return;
+  const offer = slot.dataset.offer || '';
+  if (offer.startsWith('edit-')) slot.innerHTML = editOfferHtml(offer.slice(5));
+  else if (lastAsk) slot.innerHTML = aiOfferHtml(lastAsk.found);
 }
 // 알림은 금방 사라지므로 버튼 아래에도 한 줄 남긴다 (글자는 textContent 로)
 function setOfferMsg(btn, msg) {
@@ -481,6 +492,140 @@ function ask(text) {
   next.materials = r.materials;
   switchDesign(next);
   showUnderstood(r.understood, r.unknown, r.candidates.filter(id => id !== r.templateId).slice(0, 2), aiOffer(true));
+}
+
+// ---------- 이 설계 고치기 ----------
+// 무료 규칙(parseEdit)이 먼저 치수·자재·이름을 고친다. 부품 추가·빼기 같은 것은 사용자가 버튼을 누를 때만 AI 로 (돈이 들어서).
+// 템플릿과 설계 id 는 그대로라 슬라이더와 되돌리기가 살아 있다
+// kind: all (다 알아들음), some (일부만), none (하나도 못 알아들음)
+function editOfferHtml(kind) {
+  if (kind === 'all') {
+    return settings.useAI && settings.apiKey ? `<div class="ai-offer small"><button type="button" data-act="ai-edit">원하는 대로 안 됐으면 AI로 더 정확히 고치기 (${AI_EDIT_COST})</button></div>` : '';
+  }
+  if (!settings.useAI) return '<p class="note">부품 추가·빼기·옮기기처럼 무료로 못 고치는 것은 설정에서 "AI 도움"을 켜면 AI로 고칠 수 있어요.</p>';
+  if (!settings.apiKey) return '<div class="ai-offer"><p>AI로 고치려면 클로드 API 키가 필요해요.</p><button type="button" data-act="open-key-settings">설정 열기 (키 만드는 법)</button></div>';
+  const some = kind === 'some';
+  return `<div class="ai-offer"><p>${some ? '못 알아들은 부분은 AI가 고칠 수 있어요.' : 'AI로 고칠까요?'} 부품 추가·빼기·옮기기도 돼요.</p><button type="button" class="primary" data-act="ai-edit">${some ? '못 알아들은 부분은 AI로 고치기' : 'AI로 고치기'} (${AI_EDIT_COST})</button></div>`;
+}
+
+function showEditResult(lines, unknown, kind, title, changed) {
+  const tip = changed ? '<p class="note">마음에 안 들면 위쪽 되돌리기 버튼이나 Ctrl+Z 로 돌아가요.</p>' : '';
+  const offer = `<div class="ai-offer-slot" data-offer="edit-${kind}">${editOfferHtml(kind)}</div>`;
+  const shown = lines.length ? lines : [kind === 'none' ? '무료 규칙으로는 알아듣지 못했어요.' : '바꿀 것을 찾지 못했어요.'];
+  showUnderstood(shown, unknown, [], tip + offer, title);
+}
+
+function editDesign(text) {
+  if (aiBusy) { toast('AI가 고치는 중이에요. 끝난 뒤에 다시 해 주세요.'); return; }
+  const t = derived.template;
+  const r = parseEdit(text, design, t);
+  const changed = Object.keys(r.edit.params).length > 0 || Object.keys(r.edit.materials).length > 0 || r.edit.title !== undefined;
+  if (changed) {
+    const res = applyEdit(design, r.edit, { template: t, parts: derived.parts });
+    editDraft = '';
+    mutate(() => { design = res.design; }, { refit: true });
+  }
+  // AI 로 이어서 고칠 때는 원래 글 전체와 무료 규칙이 이미 고친 줄을 같이 보낸다 (상대값을 두 번 고치지 않게)
+  lastEdit = { text, applied: changed ? r.lines : [], designId: design.id };
+  const unknown = r.unknown.length > 0;
+  const kind = changed ? (unknown ? 'some' : 'all') : (unknown ? 'none' : 'all');
+  const title = changed ? '이렇게 고쳤어요' : unknown ? '고치지 못했어요' : '바꿀 것이 없었어요';
+  showEditResult(r.lines, r.unknown, kind, title, changed);
+  const count = Object.keys(r.edit.params).length + Object.keys(r.edit.materials).length + (r.edit.title !== undefined ? 1 : 0);
+  revealOnPhone(changed ? `${count}곳 고쳤어요${unknown ? '. 못 알아들은 말도 있어요' : ''}` : title);
+}
+
+// 폰: 결과 상자는 화면 맨 위, 고치기 칸은 아래 창이라 결과와 AI 버튼이 가려진다.
+// 아래 창을 접고 맨 위로 올린 뒤 한 줄로 알린다 (msg 가 없으면 알림 없이)
+function revealOnPhone(msg) {
+  if (!isPhone()) return;
+  openSheet(false);
+  window.scrollTo(0, 0);
+  if (msg) toast(msg);
+}
+
+// AI 고치기 결과: 실제로 바뀐 줄이 먼저, AI 설명은 그 아래에 작게
+function showAiEditResult(r, res, cost) {
+  const changed = res.lines.length > 0;
+  const explain = r.summary.length ? `<div class="ai-explain"><b>AI 설명</b><ul>${r.summary.map(s => `<li>${esc(s)}</li>`).join('')}</ul></div>` : '';
+  const tip = changed ? '<p class="note">마음에 안 들면 위쪽 되돌리기 버튼이나 Ctrl+Z 로 돌아가요.</p>' : '';
+  showUnderstood(changed ? res.lines : ['바뀐 것이 없어요.'], [...r.questions, ...res.unknown], [],
+    `${explain}${tip}${cost ? `<p class="note">${esc(cost)}</p>` : ''}`, changed ? 'AI가 이렇게 고쳤어요' : 'AI가 바꾼 것이 없어요');
+}
+
+function showRebuildOffer(r, cost) {
+  const extra = `<div class="ai-offer"><p>이 요청은 템플릿으로 안 돼서 통째로 다시 설계했어요 (부품 ${r.rebuild.parts.length}개). 적용하면 슬라이더가 없는 직접 설계로 바뀌어요. 지금 설계는 내 작업에 남아요.</p>
+    <div class="row-btns"><button type="button" class="primary" data-act="apply-rebuild">적용(직접 설계로)</button><button type="button" data-act="drop-rebuild">안 함</button></div>
+    ${cost ? `<p class="note">${esc(cost)}</p>` : ''}</div>`;
+  const summary = r.summary.length ? r.summary : [`AI가 다시 만든 설계: ${r.rebuild.title}`];
+  showUnderstood(summary, r.questions, [], extra, 'AI가 통째로 다시 설계했어요');
+}
+
+async function runAiEdit(btn) {
+  const edit = lastEdit;
+  if (!edit?.text || aiBusy) return;
+  // 설정에서 끈 뒤에 화면에 남은 버튼을 눌러도 돈이 들지 않게
+  if (!settings.useAI) { refreshAiOffer(); toast('설정에서 AI 도움이 꺼져 있어요. 켜면 AI로 고칠 수 있어요.'); return; }
+  if (!settings.apiKey) { openSettings({ guide: true }); toast('AI로 고치려면 클로드 API 키가 필요해요. 키 만드는 법을 펼쳐 두었어요.'); return; }
+  if (edit.designId !== design.id) { toast('다른 설계로 바뀌었어요. 고칠 점을 다시 적어 주세요.'); return; }
+  const label = btn.textContent;
+  const startId = design.id;
+  aiBusy = true;
+  btn.disabled = true;
+  btn.textContent = 'AI가 고치는 중이에요... (20초~1분)';
+  setOfferMsg(btn, '');
+  $('#askBtn').disabled = true;
+  try {
+    const r = await editWithAI(edit.text, { design, template: derived.template, parts: derived.parts, applied: edit.applied }, settings.apiKey);
+    const cost = noteUsage(r.costKrw);
+    // 기다리는 동안 다른 설계를 열었으면 그 설계에 적용하지 않는다
+    if (design.id !== startId) {
+      btn.disabled = false;
+      btn.textContent = label;
+      toast(`AI 답이 왔지만 그 사이 다른 설계로 바뀌어서 적용하지 않았어요.${cost ? ` (${cost})` : ''}`);
+      return;
+    }
+    lastEdit = null;
+    // 돈이 든 고치기가 끝났으니 고치기 칸의 글을 비운다 (같은 글로 또 눌러 두 번 돈이 들지 않게)
+    editDraft = '';
+    if (r.mode === 'rebuild') {
+      pendingRebuild = r.rebuild;
+      renderRightPanel();
+      showRebuildOffer(r, cost);
+      revealOnPhone();
+      toast(`AI가 통째로 다시 설계했어요. 적용할지 골라 주세요.${cost ? ` ${cost}.` : ''}`);
+      return;
+    }
+    const res = applyEdit(design, r, { template: derived.template, parts: derived.parts });
+    if (res.lines.length) mutate(() => { design = res.design; }, { refit: true });
+    else renderRightPanel();
+    showAiEditResult(r, res, cost);
+    revealOnPhone();
+    toast(`${res.lines.length ? `AI가 ${res.lines.length}곳 고쳤어요.` : 'AI가 바꾼 것이 없어요.'}${cost ? ` ${cost}.` : ''}`);
+  } catch (e) {
+    const cost = noteUsage(e.costKrw);
+    const msg = cost ? `${e.message} (${cost})` : e.message;
+    toast(msg);
+    btn.disabled = false;
+    btn.textContent = label;
+    setOfferMsg(btn, msg);
+  } finally {
+    aiBusy = false;
+    $('#askBtn').disabled = false;
+  }
+}
+
+// AI 가 통째로 다시 설계한 것을 새 직접 설계로 연다 (말로 설계의 AI 설계 적용과 같은 방법). 지금 설계는 내 작업에 남긴다
+function applyRebuild() {
+  const rb = pendingRebuild;
+  pendingRebuild = null;
+  if (!rb) return;
+  if (design.fresh) { delete design.fresh; store.saveDesign(design); }
+  const next = newDesign('custom');
+  Object.assign(next, { title: rb.title, extraParts: rb.parts, aiSteps: rb.steps, aiHardware: rb.hardware });
+  switchDesign(next);
+  showUnderstood([`AI가 다시 만든 설계: ${rb.title}`, `부품 ${rb.parts.length}개`, '부품을 눌러 크기와 위치를 고칠 수 있어요.'], [], [], '', '직접 설계로 바꿨어요');
+  toast('직접 설계로 바꿨어요. 이전 설계는 내 작업에 남아 있어요.');
 }
 
 // ---------- 파일 내보내기 ----------
@@ -800,6 +945,9 @@ document.addEventListener('click', async e => {
     }
     case 'open-prices': openSettings(); break;
     case 'ai-design': runAiDesign(t); break;
+    case 'ai-edit': runAiEdit(t); break;
+    case 'apply-rebuild': applyRebuild(); break;
+    case 'drop-rebuild': pendingRebuild = null; $('#understood').hidden = true; toast('적용하지 않았어요. 지금 설계는 그대로예요.'); break;
     case 'open-key-settings': openSettings({ guide: true }); break;
   }
 });
@@ -818,6 +966,9 @@ document.addEventListener('submit', e => {
   } else if (f.dataset.act === 'vision-fix') {
     const text = String(fd.get('fix') || '').trim();
     if (text) fixVision(text, f);
+  } else if (f.dataset.act === 'design-edit') {
+    const text = String(fd.get('edit') || '').trim();
+    if (text) editDesign(text);
   } else if (f.dataset.act === 'add-part') {
     const ep = partFromForm(fd, makeId('p'));
     if (derived.parts.length) {
@@ -831,6 +982,8 @@ document.addEventListener('submit', e => {
 
 document.addEventListener('input', e => {
   const t = e.target;
+  // 이 설계 고치기 칸: 쓰던 글을 기억해 두었다가 오른쪽 패널을 다시 그릴 때 넣는다
+  if (t.name === 'edit' && t.closest?.('form[data-act="design-edit"]')) { editDraft = t.value; return; }
   const act = t.dataset?.act;
   if (!act) return;
   if (act === 'param') {
@@ -969,6 +1122,12 @@ document.addEventListener('change', e => {
 // 키보드 밀기: 화살표 좌우 = 좌우, 위 = 뒤(-z), 아래 = 앞(+z), PageUp·PageDown = 위아래 (밀기 버튼과 같은 단계)
 const NUDGE_KEYS = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [2, -1], ArrowDown: [2, 1], PageUp: [1, 1], PageDown: [1, -1] };
 document.addEventListener('keydown', e => {
+  // 이 설계 고치기 칸에서 Ctrl+Enter 는 바로 고치기 (Enter 만 누르면 줄바꿈)
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target?.name === 'edit' && e.target.form?.dataset.act === 'design-edit') {
+    e.preventDefault();
+    e.target.form.requestSubmit();
+    return;
+  }
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); undo(); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selectedPart()) { e.preventDefault(); removeSelected(); }

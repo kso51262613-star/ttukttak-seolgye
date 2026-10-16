@@ -44,6 +44,13 @@ export function resolveMaterials(t, design) {
   return out;
 }
 
+// 템플릿 자재 칸의 고를 수 있는 자재 키들. 없는 칸이나 __proto__ 같은 이름이면 null (AI 가 보낸 칸 이름 검사용)
+export function slotOptions(t, slot) {
+  const mo = t?.materialOptions;
+  if (!mo || typeof slot !== 'string' || !Object.hasOwn(mo, slot)) return null;
+  return Array.isArray(mo[slot]) ? mo[slot] : null;
+}
+
 export function clampParams(t, params) {
   const out = {};
   const adjusted = [];
