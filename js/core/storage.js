@@ -20,6 +20,9 @@ export function cleanImportedSettings(s) {
   }
   if (typeof s.useAI === 'boolean') out.useAI = s.useAI;
   if (typeof s.hourlyRate === 'number' && Number.isFinite(s.hourlyRate) && s.hourlyRate >= 0) out.hourlyRate = s.hourlyRate;
+  // 부품 밀기 단계(mm)와 3D 연결부 표식 보기
+  if ([1, 10, 50].includes(s.nudgeStep)) out.nudgeStep = s.nudgeStep;
+  if (typeof s.showJoints === 'boolean') out.showJoints = s.showJoints;
   return out;
 }
 

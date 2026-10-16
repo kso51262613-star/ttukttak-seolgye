@@ -6,6 +6,7 @@ import { WOOD_TOOLS } from './templates/wood.js';
 import { METAL_TOOLS, METAL_SAFETY } from './templates/metal.js';
 import { SAFETY_BASE, MASONRY_TOOLS, MASONRY_SAFETY } from './templates/helpers.js';
 import { estimateWeight } from './measure.js';
+import { fastenerTotals, hasType, FASTENERS } from './joints.js';
 
 const area = p => 2 * (p.size[0] * p.size[1] + p.size[1] * p.size[2] + p.size[0] * p.size[2]) / 1e6;
 
@@ -26,7 +27,7 @@ function priced(prefix, list) {
   });
 }
 
-export function buildBom(design, parts, cut, template, priceOverrides = {}) {
+export function buildBom(design, parts, cut, template, priceOverrides = {}, joints = []) {
   const groups = new Set(parts.map(p => MATERIALS[p.material]?.group));
   const hasWood = groups.has('wood');
   const hasMetal = groups.has('metal');
@@ -46,7 +47,7 @@ export function buildBom(design, parts, cut, template, priceOverrides = {}) {
     materials.push({ id: `mortar:${key}`, name: mortar.name, qty, unit: '포', price: mortar.price, cost: qty * mortar.price });
   }
 
-  // 부속
+  // 부속: 템플릿 목록(또는 AI 목록)에서 연결부가 대신 세는 것을 빼고 연결부 값을 넣는다
   let hw = [];
   if (template && template.id !== 'custom') {
     const base = parts.filter(p => !p.extra);
@@ -54,12 +55,34 @@ export function buildBom(design, parts, cut, template, priceOverrides = {}) {
   } else if (Array.isArray(design.aiHardware)) {
     hw = design.aiHardware.filter(h => h && h.name && h.qty > 0).map(h => ({ unit: '개', price: 0, ...h }));
   }
+  // 정원·야외 작품의 나무 피스는 녹슬지 않는 스테인리스로 (값은 약 2.5배)
+  const outdoor = template?.category === 'outdoor';
+  const jointHw = fastenerTotals(joints).map(h => outdoor && /^목공 피스/.test(h.name)
+    ? { ...h, name: h.name.replace(/^목공 피스/, '스테인리스 피스') + '(야외용)', price: Math.round(h.price * 2.5) }
+    : h);
+  // 직접·AI 설계: 연결부가 하나라도 있으면 AI 가 적은 피스·볼트 줄은 연결부 값으로 대신한다
+  if ((!template || template.id === 'custom') && jointHw.length) hw = hw.filter(h => !/피스|볼트|너트|와셔|핀|나사|스크류|클램프|경첩|힌지/.test(h.name));
+  const jointMap = new Map(jointHw.map(h => [h.name, h]));
+  const hasWoodScrew = jointHw.some(h => /^(목공|스테인리스) 피스/.test(h.name));
+  const hasTruss = jointHw.some(h => h.name.startsWith('철재용 트러스'));
+  // 같은 이름 줄은 템플릿 개수와 연결부 개수 중 큰 값 (접은 상태처럼 연결부가 줄어도 준비물이 모자라지 않게)
+  hw = hw.flatMap(h => {
+    if (hasWoodScrew && /^(목공|스테인리스) 피스/.test(h.name)) return [];
+    if (hasTruss && /트러스 피스|판 고정 피스/.test(h.name)) return [];
+    const j = jointMap.get(h.name);
+    if (j) { jointMap.delete(h.name); return [{ ...h, qty: Math.max(h.qty, j.qty) }]; }
+    return [h];
+  });
+  hw.push(...jointMap.values());
   const extras = parts.filter(p => p.extra || !template || template.id === 'custom');
   const extraWood = extras.filter(p => MATERIALS[p.material]?.group === 'wood').length;
   const extraMetal = extras.filter(p => MATERIALS[p.material]?.group === 'metal').length;
   const extraMasonry = extras.filter(p => MATERIALS[p.material]?.group === 'masonry').length;
-  if (extraWood) hw.push({ name: '목공 피스 65mm', qty: extraWood * 4, unit: '개', price: 15 });
-  if (extraMetal && !hw.some(h => h.name.startsWith('용접봉'))) hw.push({ name: '용접봉 2.6mm', qty: 1, unit: '봉지(1kg)', price: 8000 });
+  // 맞닿은 곳을 못 찾은 추가 나무 부품은 예전처럼 부품당 피스 4개로 어림
+  const lonelyWood = extras.filter(p => MATERIALS[p.material]?.group === 'wood' && !joints.some(j => j.a === p.id || j.b === p.id)).length;
+  if (lonelyWood) hw.push({ name: FASTENERS.screw_65.name, qty: lonelyWood * 4, unit: '개', price: FASTENERS.screw_65.price });
+  if ((hasType(joints, 'weld') || extraMetal) && !hw.some(h => h.name.startsWith('용접봉'))) hw.push({ name: FASTENERS.rod.name, qty: 1, unit: FASTENERS.rod.unit, price: FASTENERS.rod.price });
+  if (hasWoodScrew && !hw.some(h => h.name.includes('본드'))) hw.push({ name: FASTENERS.glue.name, qty: 1, unit: FASTENERS.glue.unit, price: FASTENERS.glue.price });
   const hardware = priced('hw', mergeByName(hw));
 
   // 마감재

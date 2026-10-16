@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-  <link rel="stylesheet" href="css/style.css?v=7">
+  <link rel="stylesheet" href="css/style.css?v=8">
   <script type="importmap">
   {
     "imports": {
@@ -47,6 +47,8 @@
           <button data-view="front">정면</button>
           <button data-view="side">측면</button>
           <button data-view="top">윗면</button>
+          <button data-act="save-png" title="3D 사진 저장">3D 사진</button>
+          <button data-act="toggle-joints" class="on" id="jointsBtn" title="연결부 표식 보기·숨기기">연결부</button>
         </div>
         <div class="viewer-help">돌리기: 끌기 · 확대: 휠/두 손가락 · 부품 누르고 끌어서 옮기기</div>
         <div class="viewer-stats" id="stats"></div>
@@ -56,7 +58,10 @@
       <div class="tab-body" id="tabBody"></div>
     </section>
 
-    <aside class="right panel" id="right"></aside>
+    <aside class="right panel" id="right">
+      <button type="button" class="sheet-handle" id="sheetHandle" data-act="toggle-sheet">부품·치수 ▲</button>
+      <div id="rightBody"></div>
+    </aside>
   </main>
 
   <dialog id="settings">
@@ -139,6 +144,6 @@
   </dialog>
 
   <div class="toast" id="toast" hidden></div>
-  <script type="module" src="js/app.js?v=7"></script>
+  <script type="module" src="js/app.js?v=8"></script>
 </body>
 </html>

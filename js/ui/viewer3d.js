@@ -1,4 +1,4 @@
-// 3D 화면: 부품 보기, 클릭 선택, 선택한 부품 끌어 옮기기 (Shift = 위아래)
+// 3D 화면: 부품 보기, 클릭 선택, 선택한 부품 끌어 옮기기 (Shift = 위아래), 연결부 표식 보기·누르기
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MATERIALS, materialProfile, longAxis } from '../core/materials.js';
@@ -118,6 +118,18 @@ function partGeometry(p) {
   return new THREE.BoxGeometry(w, h, d);
 }
 
+// 용접 표식: 맞닿은 직사각형 둘레 네 변 (가운데 기준 상대 좌표, m). 넓이가 없으면(템플릿이 점으로 지정) null
+function weldRect(face) {
+  const a = face.axis;
+  const [i, k] = [(a + 1) % 3, (a + 2) % 3];
+  const c = face.center;
+  if (face.max[i] - face.min[i] < 1 && face.max[k] - face.min[k] < 1) return null;
+  const corner = (u, v) => { const p = [0, 0, 0]; p[i] = (u - c[i]) * S; p[k] = (v - c[k]) * S; return p; };
+  const pts = [corner(face.min[i], face.min[k]), corner(face.max[i], face.min[k]), corner(face.max[i], face.max[k]), corner(face.min[i], face.max[k])];
+  const seg = [0, 1, 1, 2, 2, 3, 3, 0].flatMap(n => pts[n]);
+  return new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(seg, 3));
+}
+
 export class Viewer {
   constructor(container, { onSelect, onMove } = {}) {
     this.el = container;
@@ -156,12 +168,28 @@ export class Viewer {
     this.group = new THREE.Group();
     this.scene.add(this.group);
 
+    // 연결부 표식 (구멍 구, 볼트·핀 원기둥, 용접 선, 클램프·경첩·본드 상자). 구멍은 맞닿은 면(부품 속)에 있으므로
+    // 표식은 부품에 가려지지 않게 맨 위에 그린다. 재질은 표식끼리 나눠 쓰고 지울 때는 모양만 버린다
+    this.markers = new THREE.Group();
+    this.scene.add(this.markers);
+    const onTop = { depthTest: false, depthWrite: false };
+    this.markMats = {
+      hole: new THREE.MeshStandardMaterial({ color: '#ff7a1a', emissive: '#ff7a1a', emissiveIntensity: 0.4, ...onTop }),
+      box: new THREE.MeshStandardMaterial({ color: '#1565c0', emissive: '#1565c0', emissiveIntensity: 0.3, ...onTop }),
+      // 용접 선은 어두운 철 위에서 보이게 밝은 노랑 (고른 묶음은 주황)
+      weld: new THREE.LineBasicMaterial({ color: '#ffd54f', ...onTop }),
+      weldOn: new THREE.LineBasicMaterial({ color: '#ff7a1a', ...onTop })
+    };
+    this.selectedJoint = null;
+
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.target.set(0, 0.4, 0);
     this.controls.addEventListener('change', () => this.requestRender());
 
     this.raycaster = new THREE.Raycaster();
+    // 용접 선 누르기 여유 (기본 1 은 1m 라 너무 넓다)
+    this.raycaster.params.Line.threshold = 0.006;
     this.pointer = new THREE.Vector2();
     this.drag = null;
     this.down = null;
@@ -242,6 +270,47 @@ export class Viewer {
     this.requestRender();
   }
 
+  // 표식 지우기: 모양만 버린다 (재질은 나눠 쓰는 것)
+  clearMarkers() {
+    for (const m of this.markers.children) m.geometry.dispose();
+    this.markers.clear();
+  }
+
+  // 연결부 표식. 구멍마다 주황 구(볼트·핀은 구멍 축 방향 원기둥, 길이 = 부속 길이), 용접은 맞닿은 직사각형 둘레 선,
+  // 구멍 없는 클램프·경첩·본드는 맞닿은 면 가운데 파란 상자. 고른 묶음(selected 글자)은 1.5배(용접 선은 주황).
+  // 표식은 userData.joint = 묶음 글자, userData.marker = true 로 누를 수 있다. show 가 false 면 숨긴다
+  setJoints(joints, { show = true, selected = null } = {}) {
+    this.clearMarkers();
+    this.selectedJoint = selected;
+    for (const j of joints || []) {
+      if (j.type === 'none') continue;
+      const on = !!selected && j.group === selected;
+      const add = (obj, at) => {
+        obj.position.set(at[0] * S, at[1] * S, at[2] * S);
+        if (on && !obj.isLine) obj.scale.setScalar(1.5);
+        obj.renderOrder = 10;
+        obj.userData.joint = j.group;
+        obj.userData.marker = true;
+        this.markers.add(obj);
+      };
+      const rect = j.type === 'weld' && j.face ? weldRect(j.face) : null;
+      if (rect) add(new THREE.LineSegments(rect, on ? this.markMats.weldOn : this.markMats.weld), j.face.center);
+      else if (j.holes?.length && j.type !== 'weld') {
+        for (const h of j.holes) {
+          let geo;
+          if (j.type === 'bolt' || j.type === 'pin') {
+            geo = new THREE.CylinderGeometry(0.004, 0.004, (j.fastener?.len || 60) * S, 10);
+            if (h.axis === 0) geo.rotateZ(Math.PI / 2);
+            else if (h.axis === 2) geo.rotateX(Math.PI / 2);
+          } else geo = new THREE.SphereGeometry(0.006, 12, 8);
+          add(new THREE.Mesh(geo, this.markMats.hole), h.at);
+        }
+      } else if (j.face) add(new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, 0.012), this.markMats.box), j.face.center);
+    }
+    this.markers.visible = show !== false;
+    this.requestRender();
+  }
+
   // 카메라 맞춤은 참고용(트럭 같은 주변 모양)을 빼고 진짜 부품 기준
   bounds() {
     const all = [...this.meshes.values()];
@@ -273,16 +342,28 @@ export class Viewer {
     this.fit(dirs[name] || dirs.iso);
   }
 
+  // 3D 사진은 연결부 표식 없이 (판매글 사진에 주황 점이 찍히지 않게)
   snapshot() {
+    const shown = this.markers.visible;
+    this.markers.visible = false;
     this.renderer.render(this.scene, this.camera);
-    return this.renderer.domElement.toDataURL('image/png');
+    const url = this.renderer.domElement.toDataURL('image/png');
+    this.markers.visible = shown;
+    this.requestRender();
+    return url;
   }
 
+  // 누른 곳의 부품 또는 연결부 표식. 표식은 부품 위에 그려지므로 보이는 표식에 닿으면 표식이 먼저고,
+  // 표식끼리는 점 표식(구·원기둥·상자)이 선(용접, 누르기 여유가 넓음)보다 먼저다
   pick(e) {
     const r = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    return this.raycaster.intersectObjects([...this.meshes.values()].filter(m => !m.userData.ref), false)[0] || null;
+    // 방금 다시 만든 표식·부품도 맞게 (화면을 한 번 그리기 전에 눌러도)
+    this.scene.updateMatrixWorld();
+    const marks = this.markers.visible ? this.markers.children : [];
+    const hits = this.raycaster.intersectObjects([...marks, ...[...this.meshes.values()].filter(m => !m.userData.ref)], false);
+    return hits.find(h => h.object.userData.marker && !h.object.isLine) || hits.find(h => h.object.userData.marker) || hits[0] || null;
   }
 
   rayOnPlane(e, plane) {
@@ -293,10 +374,20 @@ export class Viewer {
     return this.raycaster.ray.intersectPlane(plane, out) ? out : null;
   }
 
+  // 부품만 집는다 (끌기 시작 판정용: 표식이 위에 겹쳐 있어도 고른 부품을 끌 수 있게)
+  pickPart(e) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    this.scene.updateMatrixWorld();
+    return this.raycaster.intersectObjects([...this.meshes.values()].filter(m => !m.userData.ref), false)[0] || null;
+  }
+
   handleDown(e) {
     this.down = { x: e.clientX, y: e.clientY };
-    const hit = this.pick(e);
-    if (hit && hit.object.userData.id === this.selectedId) {
+    const hit = this.pickPart(e);
+    // 표식은 끌기 시작점이 아니다 (누르기만)
+    if (hit && !hit.object.userData.marker && hit.object.userData.id === this.selectedId) {
       const vertical = e.shiftKey;
       const normal = vertical
         ? new THREE.Vector3().subVectors(this.camera.position, hit.point).setY(0).normalize()
@@ -335,7 +426,8 @@ export class Viewer {
     }
     if (clickLike) {
       const hit = this.pick(e);
-      this.onSelect(hit ? hit.object.userData.id : null);
+      if (hit?.object.userData.marker) this.onSelect(`joint:${hit.object.userData.joint}`);
+      else this.onSelect(hit ? hit.object.userData.id : null);
     }
   }
 }

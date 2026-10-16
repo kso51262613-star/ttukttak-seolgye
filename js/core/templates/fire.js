@@ -4,6 +4,8 @@ import { METAL_TOOLS, METAL_SAFETY } from './metal.js';
 
 const FIRE_SAFETY = [...METAL_SAFETY, '아연도금(은색 반짝이는) 자재 사용 금지: 가열·용접 때 유해 연기'];
 const rod = { name: '용접봉 2.6mm', qty: 1, unit: '봉지(1kg)', price: 8000 };
+// 캠핑 테이블 접이 브라켓 (연결부와 준비물 목록이 같은 이름이라 한 번만 센다)
+const CAMP_HINGE = { name: '접이식 다리 브라켓(폴딩 힌지)', unit: '개', price: 3000 };
 
 export const firePlate = {
   id: 'fire-plate', name: '조립식 철판 화로대', category: 'fire', trend: true, difficulty: 2, laborHours: 3,
@@ -24,6 +26,9 @@ export const firePlate = {
     b.add('장작 받침판', m.plate, [W - 2 * T, T, D - 2 * T], [0, Math.round(H * 0.45), 0], { note: '공기구멍 지름 10mm 여러 개' });
     return b.parts;
   },
+  // 홈에 끼워 조립하므로 피스·용접 연결부가 없다
+  jointRules: () => false,
+  jointNote: '이 작품은 철판을 홈에 끼워 조립해요. 피스·용접 없이 끼움 홈(판 두께 + 0.5mm)으로 잡아요.',
   hardware: () => [{ name: '레이저·플라즈마 재단 외주(도면 전달)', qty: 1, unit: '건', price: 30000 }],
   tools: ['줄자', '그라인더(연마석·플랩디스크)', '줄(쇠줄)', '도면 출력물'], safety: FIRE_SAFETY,
   steps: p => [
@@ -103,8 +108,11 @@ export const campTable = {
     b.add('상판', m.top, [W, T, D], [0, H - T / 2, 0]);
     return b.parts;
   },
+  // 다리는 접히므로 상판에 폴딩 힌지 브라켓으로만 단다. 다리 기둥은 상판에 붙이지 않는다 (순서 3: 브라켓 달기)
+  joints: () => [1, 2].map(n => ({ a: `다리 윗대-${n}`, b: '상판-1', type: 'hinge', fastener: CAMP_HINGE, qty: 2, note: '브라켓은 상판 밑에 피스, 다리 윗대에 M6 볼트', step: 3 })),
+  jointRules: (pa, pb) => ((pa.name === '다리 기둥' && pb.name === '상판') || (pa.name === '상판' && pb.name === '다리 기둥')) ? false : null,
   hardware: () => [
-    { name: '접이식 다리 브라켓(폴딩 힌지)', qty: 4, unit: '개', price: 3000 },
+    { name: CAMP_HINGE.name, qty: 4, unit: CAMP_HINGE.unit, price: CAMP_HINGE.price },
     { name: '볼트·너트 M6', qty: 8, unit: '세트', price: 200 },
     rod
   ],
@@ -117,6 +125,10 @@ export const campTable = {
     '상판은 물에 강한 우레탄 바니쉬로 마감합니다.'
   ]
 };
+
+// 화로 테이블 다리는 분해형 M8 볼트 (앞뒤 틀에 2개, 좌우 틀에 1개씩 = 12개)
+const FT_BOLT = { name: '볼트·너트 M8(분해형 연결)', unit: '세트', price: 400, dia: 9, len: 60 };
+const FT_BOLT_ITEM = { name: FT_BOLT.name, qty: 12, unit: FT_BOLT.unit, price: FT_BOLT.price };
 
 export const fireTable = {
   id: 'fire-table', name: '화로 테이블 (가운데 구멍)', category: 'fire', trend: false, difficulty: 3, laborHours: 10,
@@ -151,8 +163,12 @@ export const fireTable = {
     for (const sx of [-1, 1]) b.add('상판 좌우', m.top, [(W - hole) / 2, T, hole], [sx * (hole / 2 + (W - hole) / 4), H - T / 2, 0]);
     return b.parts;
   },
+  joints: () => [1, 2, 3, 4].flatMap(n => [
+    { a: `다리-${n}`, b: `바깥 틀 앞뒤-${n % 2 ? 1 : 2}`, type: 'bolt', fastener: FT_BOLT, qty: 2, note: '분해할 수 있게 볼트로', step: 3 },
+    { a: `다리-${n}`, b: `바깥 틀 좌우-${n <= 2 ? 1 : 2}`, type: 'bolt', fastener: FT_BOLT, qty: 1, note: '분해할 수 있게 볼트로', step: 3 }
+  ]),
   hardware: () => [
-    { name: '볼트·너트 M8(분해형 연결)', qty: 12, unit: '세트', price: 400 },
+    FT_BOLT_ITEM,
     { name: '판 고정 피스(철재용 트러스)', qty: 16, unit: '개', price: 30 },
     rod
   ],
@@ -259,6 +275,8 @@ export const brickOvenCart = {
     b.add('연통', m.flue, [fd, OVEN.flue, fd], [0, floorTop + r + OVEN.ring + OVEN.flue / 2, z4 + OVEN.ringDepth / 2], { note: '연기 통로 위, 비 가리개 달기' });
     return b.parts;
   },
+  // 철근은 가로·세로를 철사로 묶어 격자를 만든다 (용접하지 않음)
+  jointRules: (pa, pb) => (pa.name.includes('철근') && pb.name.includes('철근')) ? false : null,
   hardware: () => [
     { name: '수평 조절발 M16 (고하중)', qty: 4, unit: '개', price: 17000 },
     { name: '연통 비 가리개(삿갓) 125', qty: 1, unit: '개', price: 22000 },

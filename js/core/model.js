@@ -24,6 +24,8 @@ export function newDesign(templateId) {
     moved: {},
     removed: [],
     checked: {},
+    jointEdits: {},
+    partEdits: {},
     aiSteps: null,
     aiHardware: null,
     laborHours: t.laborHours ?? 4,
@@ -56,6 +58,16 @@ export function clampParams(t, params) {
   return { params: out, adjusted };
 }
 
+// 사용자가 고친 부품 이름·메모 (design.partEdits[id] = { name, note }). 부품 id 는 그대로라
+// 연결부 수정·이동·빼기 기록이 이름을 바꿔도 살아남는다. 원래 이름은 origName 에 (템플릿 연결 규칙·제작 순서 찾기에 씀),
+// 사용자 메모는 템플릿 메모(note)와 따로 userNote 에. 빈 이름·빈 메모는 무시, 이름 40자·메모 200자까지
+function applyEdits(p, edits) {
+  const e = edits && typeof edits === 'object' && Object.hasOwn(edits, p.id) ? edits[p.id] : null;
+  const name = typeof e?.name === 'string' && e.name.trim() ? e.name.trim().slice(0, 40) : p.name;
+  const note = typeof e?.note === 'string' ? e.note.trim().slice(0, 200) : '';
+  return { ...p, name, origName: p.name, ...(note ? { userNote: note } : {}) };
+}
+
 export function buildParts(design) {
   const t = getTemplate(design.templateId);
   if (!t) return [];
@@ -72,7 +84,7 @@ export function buildParts(design) {
   const extra = (design.extraParts || [])
     .filter(p => MATERIALS[p.material])
     .map(p => ({ shape: 'box', note: '', ...p, extra: true }));
-  return [...base, ...extra];
+  return [...base, ...extra].map(p => applyEdits(p, design.partEdits));
 }
 
 // 만들지 않는 참고용 부품 (자재 kind 'ref'). 화면에는 흐리게 나오고 계산에는 안 들어간다

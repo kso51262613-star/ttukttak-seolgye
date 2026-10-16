@@ -124,6 +124,8 @@ export const shoeBench = {
     spread(n2, -inner / 2 + sw / 2, inner / 2 - sw / 2).forEach(z => b.add('신발 선반 살', m.slat, [W, st, sw], [0, 180 + s / 2 + st / 2, z]));
     return b.parts;
   },
+  // 살은 틀 아래에서 가로대에 피스로 고정한다. 살 모서리가 기둥 옆면에 닿는 곳은 붙이지 않는다
+  jointRules: (pa, pb) => ((pa.name === '기둥' && pb.name.endsWith('살')) || (pb.name === '기둥' && pa.name.endsWith('살'))) ? false : null,
   hardware: parts => [rod, caps(parts), woodScrews(parts.filter(x => x.material === 'spf_1x4').length * 2)],
   tools: [...METAL_TOOLS, '각도절단기 또는 원형톱'], safety: METAL_SAFETY,
   steps: p => [
@@ -170,6 +172,8 @@ export const metalSideTable = {
 
 // 리프트업 테이블 치수: 수납칸이 깊어도 아래 가로대 밑면이 바닥대보다 50mm 위에 남게 깊이를 줄인다
 const LIFT_DEFAULT_MATS = { frame: 'sq_tube_30', top: 'pine_board_24', panel: 'pine_board_18', bottom: 'ply_9', strap: 'flat_bar_40' };
+// 리프트업 경첩 (연결부와 준비물 목록이 같은 이름이라 한 번만 센다)
+const LIFT_HINGE = { name: '리프트업 경첩 (리프팅 테이블 철물) 1쌍', unit: '쌍', price: 35000 };
 function liftDims(p, m = LIFT_DEFAULT_MATS) {
   const [s] = sec(m.frame);
   const T = thick(m.top);
@@ -224,8 +228,17 @@ export const liftTopTable = {
     b.add('상판 (들리는 판)', m.top, [W, T, D], [0, H - T / 2, 0], { note: '아래에 리프트업 경첩 자리' });
     return b.parts;
   },
+  // 상판은 리프트업 경첩으로만 달리고, 틀·다리에는 붙이지 않는다 (순서 8: 경첩 달기)
+  joints: () => [{ a: '상판 (들리는 판)-1', b: '위 가로대 긴쪽-1', type: 'hinge', fastener: LIFT_HINGE, qty: 1, note: '경첩 설명서의 구멍 위치대로. 열리는 쪽이 앉는 쪽', step: 8 }],
+  // 상판은 들려야 하므로 틀에 붙이지 않는다. 수납칸 바닥판은 받침 평철 위에 얹기만 한다 (평철 밑에서 박는 피스는 얇은 바닥판을 뚫고 수납칸 안으로 나온다)
+  jointRules: (pa, pb) => {
+    const names = [pa.name, pb.name];
+    if (names.some(n => n.startsWith('상판'))) return false;
+    if (names.includes('수납칸 바닥판')) return false;
+    return null;
+  },
   hardware: parts => [
-    { name: '리프트업 경첩 (리프팅 테이블 철물) 1쌍', qty: 1, unit: '쌍', price: 35000 },
+    { name: LIFT_HINGE.name, qty: 1, unit: LIFT_HINGE.unit, price: LIFT_HINGE.price },
     woodScrews(24),
     caps(parts),
     { name: '바닥 보호 패드', qty: 4, unit: '개', price: 500 },

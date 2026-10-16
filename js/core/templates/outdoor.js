@@ -29,6 +29,8 @@ export const raisedBed = {
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add('모서리 기둥', m.post, [pt, Hh, pw], [sx * (W / 2 - t - pt / 2), Hh / 2, sz * (D / 2 - t - pw / 2)]);
     return b.parts;
   },
+  // 위아래로 쌓은 같은 판끼리는 붙이지 않는다 (판마다 모서리 기둥에 피스). 2x4 판을 고르면 두께가 얇아 자동으로는 판끼리 피스가 잡힌다
+  jointRules: (pa, pb) => pa.name === pb.name ? false : null,
   hardware: (parts, p) => [
     { name: '스테인리스 피스 75mm(야외용)', qty: p.rows * 16, unit: '개', price: 40 },
     { name: '방초 부직포', qty: 1, unit: '장', price: 5000 }
@@ -84,6 +86,8 @@ export const firewoodRack = {
 // 인스타그램 릴스에서 본 조립식 해먹 거치대: 각재를 철제 연결쇠(각파이프 용접)에 끼워 세운다.
 // 기둥 기울기 55도(영상 추정), 소켓 길이 200, 기둥 소켓 250, 각재 끝은 소켓 속 20mm 지점까지
 const HAMMOCK = { angle: 55, socket: 200, upSocket: 250, gap: 20 };
+// 소켓 고정 볼트 (연결부와 준비물 목록이 같은 이름이라 한 번만 센다)
+const HAMMOCK_BOLT = { name: '고정 볼트 M10x130 (너트·와셔 포함)', unit: '세트', price: 1000, dia: 11, len: 130 };
 
 // 슬라이더 값에서 부품 길이와 위치를 계산 (만들기와 제작 순서가 같이 쓴다).
 // 전체 길이·높이는 기둥 끝 바깥 모서리까지라 화면 전체 크기와 슬라이더가 같다
@@ -140,15 +144,30 @@ export const hammockStand = {
     }
     return b.parts;
   },
+  // 연결부 지정: 각재가 철 소켓에 들어가는 곳마다 M10x130 관통 볼트 1개. 기운 기둥·소켓은 맞닿음 판정 대신 지정으로
+  joints(parts) {
+    const byId = new Map(parts.map(x => [x.id, x]));
+    const out = [];
+    for (const n of [1, 2]) {
+      out.push({ a: '바닥 기둥-1', b: `연결쇠 안쪽 소켓-${n}`, type: 'bolt', fastener: HAMMOCK_BOLT, qty: 1, note: '소켓 옆에서 각재를 관통', step: 6 });
+      const sock = byId.get(`연결쇠 기둥 소켓-${n}`);
+      const post = byId.get(`비스듬한 기둥-${n}`);
+      if (sock && post) out.push({ a: `비스듬한 기둥-${n}`, b: `연결쇠 기둥 소켓-${n}`, type: 'bolt', fastener: HAMMOCK_BOLT, qty: 1, at: sock.pos, axis: 2, holes: [{ at: sock.pos, axis: 2, dia: 11 }], note: '소켓 가운데를 옆에서 관통', step: 6 });
+      if (sock) out.push({ a: `연결쇠 기둥 소켓-${n}`, b: `연결쇠 가운데 칸-${n}`, type: 'weld', axis: 0, note: `${HAMMOCK.angle}도로 기울여 용접`, step: 3 });
+    }
+    // 가로 받침-1·2 는 왼쪽 연결쇠의 가로 소켓-1·2, 가로 받침-3·4 는 오른쪽의 가로 소켓-3·4 에 들어간다 (만드는 순서가 같다)
+    for (const n of [1, 2, 3, 4]) out.push({ a: `가로 받침-${n}`, b: `연결쇠 가로 소켓-${n}`, type: 'bolt', fastener: HAMMOCK_BOLT, qty: 1, note: '소켓 옆에서 관통', step: 6 });
+    return out;
+  },
   // 보통 아이볼트는 나사가 22mm 라 각재를 뚫어 고정할 수 없어서, 전산볼트를 관통하고 아이너트를 단다
   hardware: () => [
     { name: '아이너트 M12 + 전산볼트 M12(150mm)·와셔·너트', qty: 2, unit: '세트', price: 4500 },
     { name: '체인 6mm 아연도금 (50cm)', qty: 2, unit: '줄', price: 1500 },
     { name: '스냅훅 (하중 0.3t 표시)', qty: 4, unit: '개', price: 6600 },
-    { name: '고정 볼트 M10x130 (너트·와셔 포함)', qty: 8, unit: '세트', price: 1000 },
+    { name: HAMMOCK_BOLT.name, qty: 8, unit: HAMMOCK_BOLT.unit, price: HAMMOCK_BOLT.price },
     { name: '용접봉 2.6mm', qty: 1, unit: '봉지(1kg)', price: 8000 }
   ],
-  tools: [...METAL_TOOLS, '각도절단기 또는 원형톱', '대패 또는 사포(각재 끝 다듬기)', '12mm·10mm 드릴 비트', '스패너'],
+  tools: [...METAL_TOOLS, '각도절단기 또는 원형톱', '대패 또는 사포(각재 끝 다듬기)', '12mm·11mm 드릴 비트', '스패너'],
   safety: [
     ...METAL_SAFETY,
     '평평한 바닥에 두세요. 기울어진 곳이면 넘어질 수 있어요',
@@ -177,6 +196,10 @@ export const hammockStand = {
 // 2026-10-12 검토 반영: 접이식 힌지는 접힐 때 틀 모서리에 걸리고 평철 40 으로 귀를 못 만들어 "떼었다 볼트로 다는 다리"로,
 // 가이드 앵글·걸쇠는 작동하지 않아 "ㄱ자 덮개 키퍼"로 바꿈. 다리는 700 이상 뽑았을 때만 세울 수 있다 (덜 뽑으면 열린 테일게이트 위)
 const RACK = { leg: 900, foot: 30, bedDepth: 530, keep: 500, wall: 70, legMin: 700, lip: 15, keeperUp: 44, keeperW: 75, tabT: 6, tabLen: 80 };
+// 연결부 부속. 준비물 목록에도 같은 이름으로 넣어 한 번만 센다. 락핀 구멍은 M10 볼트 구멍과 같은 11mm (드릴 비트 하나로)
+const RACK_CLAMP = { name: 'J클램프 (적재함 울타리 철 턱을 무는 것, 캐노피·툴박스용)', unit: '개', price: 8000 };
+const RACK_BOLT = { name: '다리 고정 볼트 M10x100 (너트·와셔 포함)', unit: '세트', price: 1000, dia: 11, len: 100 };
+const RACK_PIN = { name: '스프링 락핀 10mm (다리 길이·가로대)', unit: '개', price: 3000, dia: 11, len: 60 };
 
 function rackGeo(p, m) {
   const [s] = sec(m.frame);
@@ -267,10 +290,46 @@ export const truckRack = {
     }
     return b.parts;
   },
+  // 연결부 지정: 클램프(참고용 옆벽에), 다리 볼트 탭 M10 2개(세웠을 때), 속대 락핀, 가로대 핀. 미닫이와 고정 틀은 서로 붙이지 않는다.
+  // 순서 번호는 아래 steps 의 몇 번째 줄인지 (5 다리 만들기, 7 차에 올리기, 8 써 보기)
+  joints(parts) {
+    const byId = new Map(parts.map(x => [x.id, x]));
+    const out = [];
+    for (const n of [1, 2]) {
+      const rail = byId.get(`고정 틀 긴 대-${n}`);
+      // 클램프 표시는 고정 틀 긴 대 밑면과 울타리 윗면이 만나는 곳
+      if (rail) out.push({ a: `고정 틀 긴 대-${n}`, b: `적재함 옆벽-${n}`, type: 'clamp', fastener: RACK_CLAMP, qty: 3, at: [rail.pos[0], rail.pos[1] - rail.size[1] / 2, rail.pos[2]], axis: 0, note: '울타리 철 턱을 물림. 뒤쪽 클램프는 뒤끝에서 150 이상 앞', step: 7 });
+      const tab = byId.get(`다리 볼트 탭-${n}`);
+      const leg = byId.get(`다리 겉대-${n}`);
+      if (!tab || !leg) continue;
+      out.push({ a: `다리 속대-${n}`, b: `다리 겉대-${n}`, type: 'pin', fastener: RACK_PIN, qty: 1, note: '겉대 아래쪽 구멍 중 높이에 맞는 것', step: 5 });
+      // 다리를 세웠을 때만 (겉대가 세로로 섬): 볼트 탭에 M10 2개, 가로대는 속대 사이에 핀으로
+      if (leg.size[1] > leg.size[0]) {
+        const top = tab.pos[1] + tab.size[1] / 2;
+        out.push({
+          a: `다리 겉대-${n}`, b: `다리 볼트 탭-${n}`, type: 'bolt', qty: 2, fastener: RACK_BOLT,
+          holes: [25, 60].map(dy => ({ at: [tab.pos[0], top - dy, tab.pos[2]], axis: 2, dia: 11, parts: [`다리 겉대-${n}`, `다리 볼트 탭-${n}`] })),
+          note: '탭 위에서 25·60mm', step: 8
+        });
+        out.push({ a: '다리 가로대-1', b: `다리 속대-${n}`, type: 'pin', fastener: RACK_PIN, qty: 1, note: '속대 사이에 핀으로 끼움', step: 8 });
+      }
+    }
+    return out;
+  },
+  // 미닫이·다리 쪽과 고정 틀·덮개 쪽은 미끄러져야 하므로 붙이지 않는다. 다리(볼트 탭 포함)가 가로살에 닿는 곳도 붙이지 않는다 (접은 다리는 스트랩으로 묶기만)
+  jointRules(pa, pb) {
+    const slide = n => /^(미닫이|다리)/.test(n);
+    const fixed = n => /^(고정|덮개)/.test(n);
+    if ((slide(pa.name) && fixed(pb.name)) || (fixed(pa.name) && slide(pb.name))) return false;
+    if ((/^다리/.test(pa.name) && pb.name === '미닫이 가로살') || (/^다리/.test(pb.name) && pa.name === '미닫이 가로살')) return false;
+    return null;
+  },
+  // 클램프·볼트·다리 락핀은 연결부와 같은 이름 (준비물에서 한 번만). 미닫이 잠금 락핀은 미닫이와 고정 틀 사이라 연결부로 세지 않아 따로 둔다
   hardware: () => [
-    { name: '적재함 울타리 클램프 (캐노피·툴박스용 J클램프, 철 턱을 무는 것)', qty: 6, unit: '개', price: 8000 },
-    { name: '다리 고정 볼트 M10x100 (너트·와셔 포함)', qty: 4, unit: '세트', price: 1000 },
-    { name: '스프링 락핀 10mm (미닫이 2, 다리 길이 2)', qty: 4, unit: '개', price: 3000 },
+    { name: RACK_CLAMP.name, qty: 6, unit: RACK_CLAMP.unit, price: RACK_CLAMP.price },
+    { name: RACK_BOLT.name, qty: 4, unit: RACK_BOLT.unit, price: RACK_BOLT.price },
+    { name: RACK_PIN.name, qty: 4, unit: RACK_PIN.unit, price: RACK_PIN.price },
+    { name: '스프링 락핀 10mm (미닫이 잠금)', qty: 2, unit: '개', price: 3000 },
     { name: '조절발 M12 (다리 아래)', qty: 2, unit: '개', price: 3000 },
     { name: 'D링 고리 (타포린 묶기)', qty: 8, unit: '개', price: 1500 },
     { name: '래칫 스트랩 25mm 5m (짐·접은 다리 묶기)', qty: 2, unit: '개', price: 5000 },
@@ -278,7 +337,7 @@ export const truckRack = {
     { name: '징크 스프레이 420ml', qty: 1, unit: '캔', price: 7000 },
     { name: '용접봉 2.6mm', qty: 1, unit: '봉지(1kg)', price: 8000 }
   ],
-  tools: [...METAL_TOOLS, '드릴 비트 10mm(볼트·락핀 구멍)', '줄자(차 치수 재기)', '스패너 세트'],
+  tools: [...METAL_TOOLS, '드릴 비트 11mm(볼트·락핀 구멍)', '줄자(차 치수 재기)', '스패너 세트'],
   safety: [
     ...METAL_SAFETY,
     '와일드트랙 순정 베드 레일·스포츠바와 겹치는지 먼저 확인하세요. 겹치면 고정 틀을 레일 안쪽으로 옮겨요',
@@ -297,8 +356,8 @@ export const truckRack = {
       '차를 먼저 잽니다. 적재함 길이, 울타리 중심 사이 폭, 땅에서 울타리 위까지 높이를 재서 슬라이더에 넣습니다. 순정 베드 레일·스포츠바 자리를 확인하고, 슬라이딩 베드가 뽑히는 길 안쪽에는 아무것도 두지 않습니다.',
       `각파이프 ${s}x${s} 을 자릅니다. 고정 긴 대 ${mm(g.L)}mm 2개, 고정 가로대 ${mm(g.D - s)}mm 3개, 미닫이 긴 대 ${mm(g.Ls)}mm 2개, 미닫이 가로살 ${mm(g.D - s)}mm ${g.rungs}개, 다리 겉대 ${RACK.leg}mm 2개. 30x30 은 다리 속대 ${RACK.leg}mm 2개, 다리 가로대 ${mm(g.braceLen)}mm 1개. 평철 75x6 은 덮개 키퍼 세로 ${mm(g.L)}mm 2개와 다리 볼트 탭 ${RACK.tabLen}mm 2개, 평철 40x4 는 덮개 윗날 ${mm(g.L)}mm 2개.`,
       `고정 틀을 용접합니다. 긴 대 2개 사이에 가로대 3개를 넣어 사다리 모양으로 만듭니다(뒤 가로대는 뒤끝에서 200mm 앞, 다리 탭이 지나가는 자리). 바깥 면에 평철 75x6 을 세워 붙여 윗면이 미닫이 틀보다 4mm 위에 오게 하고, 그 위에 평철 40x4 를 눕혀 붙여 안쪽으로 ${RACK.lip}mm 나오게 합니다(ㄱ자 덮개 키퍼). 윗면에는 미끄럼 테이프를 붙입니다.`,
-      `미닫이 틀을 용접합니다. 긴 대 2개 사이에 가로살 ${g.rungs}개. 뒤 가로살은 뒤끝에서 100mm 앞에 둡니다. 뒤끝 안쪽 면에 평철 75x6 볼트 탭(80mm)을 세워 붙이고 위 25mm·60mm 에 M10 구멍을 뚫습니다. 긴 대 앞쪽에 락핀 구멍(10mm)을 뚫습니다.`,
-      '다리를 만듭니다. 40x40 겉대 안에 30x30 속대를 넣고, 100mm 간격으로 락핀 구멍(10mm)을 뚫어 길이를 맞춥니다. 겉대 위 25mm·60mm 에 M10 구멍, 속대 아래에 조절발을 답니다.',
+      `미닫이 틀을 용접합니다. 긴 대 2개 사이에 가로살 ${g.rungs}개. 뒤 가로살은 뒤끝에서 100mm 앞에 둡니다. 뒤끝 안쪽 면에 평철 75x6 볼트 탭(80mm)을 세워 붙이고 위 25mm·60mm 에 M10 구멍을 뚫습니다. 긴 대 앞쪽에 락핀 구멍(11mm)을 뚫습니다.`,
+      '다리를 만듭니다. 40x40 겉대 안에 30x30 속대를 넣고, 100mm 간격으로 락핀 구멍(11mm)을 뚫어 길이를 맞춥니다. 겉대 위 25mm·60mm 에 M10 구멍, 속대 아래에 조절발을 답니다.',
       '용접 자국을 갈고 탈지한 뒤 방청 페인트를 칠합니다. 용접 자리와 구멍 둘레는 징크 스프레이로 한 번 더.',
       '차에 올립니다. 고정 틀을 울타리 위에 얹고 J클램프 6개로 울타리 철 턱을 물어 조입니다(뒤쪽 클램프는 뒤끝에서 150mm 이상 앞에. 그 뒤로는 다리 볼트 탭이 지나가요). 미닫이 틀을 뒤에서 덮개 키퍼 밑으로 밀어 넣고 락핀 2개로 잠급니다. 다리와 가로대는 가로살 위에 눕혀 래칫 스트랩으로 묶습니다.',
       `써 봅니다. 테일게이트를 열고 미닫이 틀을 ${RACK.legMin}mm 이상(기본 ${mm(Math.max(RACK.legMin, Math.min(800, g.Ls - RACK.keep)))}mm) 뽑아 락핀을 꽂습니다. 다리 겉대를 볼트 탭에 M10 볼트 2개로 달고, 속대를 빼서 땅에 맞춘 뒤 가로대를 끼웁니다. 흔들림이 없는지 확인한 뒤에 짐을 올리거나 타포린을 D링에 묶습니다.`

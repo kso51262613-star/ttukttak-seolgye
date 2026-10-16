@@ -161,6 +161,8 @@ export const woodShelf = {
     });
     return b.parts;
   },
+  // 선반 판은 받침대 위에 올려 피스로 고정한다. 판 모서리가 기둥 옆면에 닿는 곳은 붙이지 않는다 (깊이가 깊으면 1x4 판이 기둥에 닿음)
+  jointRules: (pa, pb) => ((pa.name === '기둥' && pb.name === '선반 판') || (pa.name === '선반 판' && pb.name === '기둥')) ? false : null,
   hardware: parts => [screws(parts.length * 2 + 16, 50), { name: '벽 고정 철물(넘어짐 방지)', qty: 2, unit: '개', price: 1500 }],
   tools: WOOD_TOOLS, safety: SAFETY_BASE,
   steps: p => [

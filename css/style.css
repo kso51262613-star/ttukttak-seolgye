@@ -137,9 +137,111 @@ h4 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); letter-spacing: .
 .add-part form { display: grid; gap: 8px; margin-top: 8px; font-size: 13px; }
 .add-part input { width: 110px; }
 
+/* 오른쪽: 부품 목록(pl-), 부품 카드(pc-), 연결부 카드(jc-), 폰 아래 창(sheet-) */
+.pl-list { display: grid; gap: 4px; }
+.pl-group { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.pl-group summary { cursor: pointer; font-size: 13px; font-weight: 700; padding: 6px 8px; }
+.pl-group summary small, .pl-item small { color: var(--muted); font-weight: 400; }
+.pl-group[open] { padding-bottom: 4px; }
+.pl-item { display: block; width: 100%; text-align: left; font-size: 12px; padding: 4px 8px; min-height: 32px; }
+.pl-group .pl-item { width: calc(100% - 8px); margin: 2px 4px; }
+.pl-one { font-size: 13px; font-weight: 700; }
+.pl-item.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.pl-ref { opacity: .6; }
+.pl-removed { display: grid; gap: 4px; }
+.pl-gone { color: var(--muted); border-style: dashed; }
+.pc-head { display: flex; align-items: center; gap: 6px; }
+.pc-num { flex: none; font-size: 20px; font-weight: 800; color: #d35400; }
+.pc-name { width: 100%; font-size: 16px; font-weight: 700; }
+.pc-orig, .pc-sub { display: block; font-size: 12px; color: var(--muted); margin: 4px 0; }
+.pc-h { font-size: 12px; font-weight: 700; margin: 8px 0 0; }
+.pc-h small { font-weight: 400; color: var(--muted); }
+.pc-move { margin: 8px 0; }
+.pc-nudge { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.pc-nudge button { min-height: 36px; padding: 4px; font-size: 13px; white-space: nowrap; }
+.pc-step { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.pc-step button { min-height: 30px; padding: 2px 8px; font-size: 12px; }
+.pc-step button.on { background: var(--green); color: #fff; border-color: var(--green); }
+.pc-keys { font-size: 11px; color: var(--muted); margin: 4px 0 0; }
+.pc-sec { font-size: 13px; margin: 8px 0; }
+.pc-sec > b { display: block; font-size: 12px; margin-bottom: 3px; }
+.pc-joints { display: grid; gap: 4px; }
+.pc-joints button { width: 100%; text-align: left; font-size: 12px; min-height: 32px; padding: 4px 8px; background: #fff; }
+.pc-tnote { font-size: 12px; color: var(--muted); margin: 4px 0; }
+.pc-empty { font-size: 12px; color: var(--muted); margin: 0; }
+.pc-card textarea { font-size: 13px; resize: vertical; }
+.jc-card { border-color: #b9d3f2; background: #f2f7fd; }
+.jc-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; }
+.jc-head small { color: var(--muted); }
+.jc-letter { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 2px solid #1565c0; color: #1565c0; background: #fff; font-weight: 800; }
+.jc-auto { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: #dce9fa; color: #1565c0; }
+.jc-parts { font-size: 13px; margin: 6px 0; }
+.jc-row { display: flex; gap: 8px; align-items: end; }
+.jc-row label { flex: 1; font-size: 12px; color: var(--muted); }
+.jc-row label + label { flex: 0 0 100px; }
+.sheet-handle { display: none; }
+/* 3D 위 버튼 줄(연결부 토글 포함)과 크기 글이 겹치지 않게 나눠 쓴다 */
+.view-btns { max-width: 58%; flex-wrap: wrap; }
+.viewer-stats { max-width: 40%; }
+.view-btns button[data-act="toggle-joints"].on { color: #d35400; border-color: #ff7a1a; font-weight: 700; }
+@media (max-width: 760px) {
+  /* 폰: 오른쪽 패널은 화면 아래 창. 접으면 손잡이(48px)만, 펼치면 화면의 60% */
+  main.layout { padding-bottom: 56px; }
+  .right {
+    position: fixed; left: 0; right: 0; bottom: 0; max-height: 60vh; padding-top: 0;
+    transform: translateY(calc(100% - 48px)); transition: transform .2s; z-index: 25;
+    border-radius: 12px 12px 0 0; box-shadow: 0 -6px 20px rgba(0,0,0,.15); overflow: auto; overscroll-behavior: contain;
+  }
+  .right.open { transform: none; }
+  .sheet-handle {
+    display: block; width: calc(100% + 24px); margin: 0 -12px 8px; min-height: 48px; position: sticky; top: 0; z-index: 1;
+    background: var(--card); font-weight: 700; border: none; border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0;
+  }
+  #toast { bottom: 64px; z-index: 30; }
+  .view-btns, .viewer-stats { max-width: none; }
+  .pc-nudge button { min-height: 44px; }
+  .pl-item, .pc-joints button { min-height: 40px; }
+}
+
 /* 결과 탭 */
 .drawing-wrap { overflow: auto; }
 .drawing { width: 100%; max-width: 980px; height: auto; display: block; }
+/* 연결부 표·확대 그림·크게 보기 */
+.drawing-wrap { touch-action: pan-x pan-y pinch-zoom; }
+.tbl-wrap { overflow-x: auto; }
+.tbl-wrap .tbl.jt { min-width: 520px; }
+.jt-h { margin: 16px 0 6px; font-size: 15px; }
+.jt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+.jt-card { margin: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: #fff; break-inside: avoid; }
+.jt-card.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.jt-card figcaption { font-size: 13px; margin-bottom: 4px; line-height: 1.4; }
+.jt-svg { width: 100%; height: auto; display: block; }
+.jt-svg .dw-part { stroke: #222; stroke-width: 1.2; }
+.jt-svg .dw-a { fill-opacity: .8; }
+.jt-svg .dw-ghost { opacity: .3; }
+.jt-svg .dw-hidden { fill: none; stroke: #888; stroke-width: 1; stroke-dasharray: 4 3; }
+.jt-svg .dw-hole circle { fill: #fff; stroke: #d35400; stroke-width: 1.4; }
+.jt-svg .dw-hole line { stroke: #d35400; stroke-width: 1; }
+.jt-svg .dw-dim line { stroke: #c0392b; stroke-width: 1; }
+.jt-svg .dw-dim text { fill: #c0392b; font-size: 12px; font-weight: 600; }
+.jt-svg .dw-info { font-size: 11px; fill: #444; }
+.jt-svg .dw-plabel { font-size: 11px; fill: #666; }
+.jt-svg .dw-weld { fill: none; stroke: #555; stroke-width: 1.4; }
+.jt-svg .dw-weldline { stroke: #555; stroke-width: 2; }
+.tbl.jt tr[data-act] { cursor: pointer; }
+.tbl.jt tr.on td { background: var(--accent-soft); }
+.tbl.jt small { color: var(--muted); }
+.tbl.jt td:first-child, .tbl.jt td:last-child, .tbl.jt th:first-child, .tbl.jt th:last-child { white-space: nowrap; }
+.jt-svg .dw-halo { paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+.jt-svg .dw-lead { stroke: #999; stroke-width: .8; }
+.jt-svg .dw-lbg { fill: #fff; fill-opacity: .85; }
+.jt-svg .dw-mark { fill: #fff; stroke: #1565c0; stroke-width: 1.4; }
+.zoom-overlay { position: fixed; inset: 0; background: #fff; z-index: 30; overflow: auto; padding: 56px 12px 12px; touch-action: pan-x pan-y pinch-zoom; }
+.zoom-overlay .zoom-bar { position: fixed; top: 8px; left: 12px; right: 12px; display: flex; gap: 8px; align-items: center; background: #fff; padding: 4px 0; z-index: 1; }
+/* 좁은 폰에서 크게·작게·닫기 글자가 두 줄로 쪼개지지 않게 (안내 글이 대신 줄바꿈) */
+.zoom-overlay .zoom-bar button { flex: none; white-space: nowrap; }
+.zoom-overlay .zoom-hint { font-size: 12px; color: var(--muted); margin-left: auto; }
+.zoom-overlay svg { width: var(--zoom, 160%); max-width: none; height: auto; display: block; }
 .tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .tbl th, .tbl td { border-bottom: 1px solid var(--line); padding: 7px 8px; text-align: left; }
 .tbl th { background: #f1ede3; font-size: 13px; }
@@ -211,6 +313,8 @@ dialog::backdrop { background: rgba(20,30,25,.45); }
   .viewer-help { display: none; }
   .viewer-stats { top: auto; bottom: 8px; right: 8px; font-size: 12px; }
   button { min-height: 42px; }
+  .view-btns { flex-wrap: wrap; }
+  .view-btns button { padding: 6px 8px; font-size: 13px; white-space: nowrap; }
 }
 
 /* 사진·영상으로 설계 */
@@ -259,4 +363,54 @@ dialog::backdrop { background: rgba(20,30,25,.45); }
   .layout { display: block; height: auto; padding: 0; }
   .tab-body { border: none; overflow: visible; padding: 0; }
   body { background: #fff; }
+  @page { size: A4; margin: 12mm; }
+  .drawing text { font-size: 15px; }
+  .drawing .dw-info, .drawing .dw-legend { font-size: 12px; }
+  .dw-faded { opacity: 1 !important; }
+  .dw-hi, .dw-label, .dw-pdim { display: none !important; }
+  .drawing .dw-bal text { font-size: 13px; }
+  .jt-grid { grid-template-columns: 1fr 1fr; }
+  .jt-card { break-inside: avoid; page-break-inside: avoid; }
+  .zoom-overlay { display: none !important; }
+}
+
+/* 재단표 원장 배치 (3단계): 같은 번호 = 같은 색. 연한 색이라 검은 글자가 읽힌다.
+   그림 글자는 기존 .cutsvg text(11px) 규칙보다 이기도록 .cutsvg .cut-* 로 쓴다 */
+:root {
+  --cut-1: #ffe08a; --cut-2: #a8d8ea; --cut-3: #c8e6c9; --cut-4: #f8c8dc; --cut-5: #d7ccc8;
+  --cut-6: #ffd4b3; --cut-7: #c5cae9; --cut-8: #dcedc8; --cut-9: #f0e3ff; --cut-10: #b2ebf2;
+}
+.cut-mat { margin: 14px 0; break-inside: avoid; page-break-inside: avoid; }
+.cut-mat h4 { font-size: 15px; font-weight: 700; color: var(--ink); letter-spacing: 0; margin: 20px 0 6px; }
+/* 폰: 920 폭 그림이 320px 에 들어가면 글자가 4px 이 되므로 최소 폭을 두고 가로로 밀어 본다 */
+.cut-wrap { overflow-x: auto; touch-action: pan-x pan-y pinch-zoom; }
+.cutsvg.cut-linear { width: 100%; max-width: 920px; min-width: 640px; touch-action: pan-x pan-y pinch-zoom; }
+.cutsvg.cut-sheet { width: 100%; max-width: 520px; min-width: 400px; }
+.cutsvg .cut-stock { fill: #f3efe6; stroke: #b9b09e; }
+.cutsvg .cut-seg { stroke: #555; stroke-width: 1; cursor: pointer; }
+.cutsvg .cut-seg:hover { stroke: #d35400; stroke-width: 2; }
+.cutsvg .cut-kerf { fill: #333; pointer-events: none; }
+/* 빗금은 rect 의 fill 속성(url(#cut-hatch))으로 칠한다 */
+.cutsvg .cut-waste { stroke: #b9b09e; }
+.cutsvg .cut-lab { font-size: 12px; font-weight: 700; fill: #222; pointer-events: none; }
+.cutsvg .cut-lab-s { font-size: 10px; }
+.cutsvg .cut-waste-t { font-size: 11px; font-weight: 600; fill: #5d5347; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.cutsvg .cut-tick { stroke: #999; }
+.cutsvg .cut-tick-t { font-size: 10px; fill: #777; }
+.cutsvg .cut-pos { font-size: 11px; fill: #c0392b; font-weight: 700; }
+.cutsvg .cut-bar-t { font-size: 12px; font-weight: 700; fill: #222; }
+.cut-chip { display: inline-block; width: 14px; height: 14px; border: 1px solid #777; border-radius: 3px; vertical-align: middle; margin-right: 4px; }
+.cut-sum td.cut-no, .cut-table td.cut-no { white-space: nowrap; }
+.cut-sum th, .cut-table th { white-space: nowrap; }
+/* 좁은 화면: 칸을 한 글자씩 쪼개지 말고 표를 가로로 밀어 본다 (연결부 표와 같은 방식) */
+.cut-sum, .cut-table { word-break: keep-all; }
+.tbl-wrap .cut-sum, .tbl-wrap .cut-table { min-width: 560px; }
+.cut-table caption { text-align: left; font-size: 13px; color: var(--muted); padding: 6px 0 4px; }
+.cut-table .cut-ok { text-align: center; }
+.cut-table input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--green-2); cursor: pointer; }
+.cut-table tr:has(input:checked) td:not(.cut-ok) { color: var(--muted); text-decoration: line-through; }
+@media print {
+  .cut-wrap { overflow: visible; }
+  .cutsvg.cut-linear, .cutsvg.cut-sheet { min-width: 0; }
+  .cut-mat { break-inside: avoid; page-break-inside: avoid; }
 }

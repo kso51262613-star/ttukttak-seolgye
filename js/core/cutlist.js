@@ -1,6 +1,7 @@
 // 재단표: 자를 목록 + 원장(통 자재) 배치
 import { MATERIALS, KERF, getMaterial, isLinear } from './materials.js';
 import { partVolume, masonryCount, wrapArea } from './measure.js';
+import { partNumbers } from './numbering.js';
 
 // 벽돌·콘크리트·단열처럼 자르지 않고 양으로 사는 자재
 export const BULK_KINDS = new Set(['masonry', 'cast', 'wrap']);
@@ -47,7 +48,7 @@ export function packSheets(pieces, W, H, kerf) {
     for (const shelf of sheet.shelves) {
       for (const [w, h, rot] of orients(p)) {
         if (shelf.x + w <= W && h <= shelf.h) {
-          sheet.placements.push({ x: shelf.x, y: shelf.y, w, h, name: p.name, rot });
+          sheet.placements.push({ x: shelf.x, y: shelf.y, w, h, name: p.name, id: p.id, num: p.num, rot });
           shelf.x += w + kerf;
           return true;
         }
@@ -56,7 +57,7 @@ export function packSheets(pieces, W, H, kerf) {
     for (const [w, h, rot] of orients(p).sort((m, n) => m[1] - n[1])) {
       if (sheet.nextY + h <= H) {
         sheet.shelves.push({ y: sheet.nextY, h, x: w + kerf });
-        sheet.placements.push({ x: 0, y: sheet.nextY, w, h, name: p.name, rot });
+        sheet.placements.push({ x: 0, y: sheet.nextY, w, h, name: p.name, id: p.id, num: p.num, rot });
         sheet.nextY += h + kerf;
         return true;
       }
@@ -89,12 +90,15 @@ export function cutList(parts, priceOverrides = {}) {
   const items = {};
   const bulk = {};
   const warnings = [];
+  // 조각마다 부품 id 와 번호(도면·부품 카드와 같은 ①②)를 실어 보낸다
+  const numbers = partNumbers(parts);
 
   for (const p of parts) {
     const m = MATERIALS[p.material];
     // 참고용 부품은 만들지 않으므로 재단표에 없다
     if (!m || m.kind === 'ref') continue;
     const d = partCutDims(p);
+    const partNo = numbers.byId.get(p.id);
     let label;
     if (BULK_KINDS.has(m.kind)) {
       // 벽돌은 장 수, 콘크리트·미장은 부피, 단열 담요는 면적으로 모은다
@@ -108,18 +112,20 @@ export function cutList(parts, priceOverrides = {}) {
       items[p.material] = (items[p.material] || 0) + 1;
     } else if (d.length) {
       label = `${d.length}`;
-      (linearCuts[p.material] ||= []).push({ len: d.length, name: p.name });
+      (linearCuts[p.material] ||= []).push({ len: d.length, name: p.name, id: p.id, num: partNo });
       // 길이 자재인데 조각의 단면이 자재 단면보다 넓으면 그 자재로는 못 만든다 (예: 평철 40 으로 80 높이 판)
       const dims = [...p.size].sort((a, b) => b - a);
       const secMax = Math.max(...(m.section || [0]));
       if (dims[1] > secMax + 0.5) warnings.push(`'${p.name}' 단면 ${Math.round(dims[1])}x${Math.round(dims[2])}mm 는 ${m.name} 단면(${(m.section || []).join('x')})보다 커요. 더 넓은 자재를 쓰거나 두 장을 이어 붙이세요.`);
     } else {
       label = `${d.w} x ${d.h}`;
-      (sheetPieces[p.material] ||= []).push({ w: d.w, h: d.h, name: p.name });
+      (sheetPieces[p.material] ||= []).push({ w: d.w, h: d.h, name: p.name, id: p.id, num: partNo });
     }
     const key = `${p.material}|${label}`;
-    const row = rowsMap.get(key) || { key, material: p.material, materialName: m.name, label, count: 0, names: [], notes: [] };
+    const row = rowsMap.get(key) || { key, material: p.material, materialName: m.name, label, count: 0, names: [], notes: [], nums: [], ids: [] };
     row.count += 1;
+    row.ids.push(p.id);
+    if (partNo && !row.nums.includes(partNo)) row.nums.push(partNo);
     if (!row.names.includes(p.name)) row.names.push(p.name);
     if (p.note && !row.notes.includes(p.note)) row.notes.push(p.note);
     rowsMap.set(key, row);
@@ -169,6 +175,7 @@ export function cutList(parts, priceOverrides = {}) {
   // 앞의 "약 ", "부피 약 " 같은 글자를 떼고 첫 숫자로 정렬
   const num = s => parseFloat(String(s).replace(/^[^0-9.]+/, '')) || 0;
   const rows = [...rowsMap.values()].sort((a, b) => a.material.localeCompare(b.material) || num(b.label) - num(a.label));
+  for (const r of rows) r.nums.sort((a, b) => a - b);
   return { rows, linear, sheets, items, bulk, stock, warnings };
 }
 

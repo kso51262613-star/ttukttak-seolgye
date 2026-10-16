@@ -1,13 +1,16 @@
 // 뚝딱설계: 상태를 들고 화면과 계산을 이어 준다
 import { Viewer } from './ui/viewer3d.js';
 import { renderTab, TABS, esc, won } from './ui/tabs.js';
+import { renderDrawing } from './ui/drawing.js';
+import { partNumbers } from './core/numbering.js';
 import { renderLeft, renderRight, partFromForm } from './ui/sidebar.js';
 import { getTemplate, MARKET_PRICES, MARKET_NOTES } from './core/templates/index.js';
-import { MATERIALS } from './core/materials.js';
-import { newDesign, buildParts, bounds, makeId, liftToFloor, keepLowest, rotOf, hasRot, isRef } from './core/model.js';
+import { MATERIALS, isLinear } from './core/materials.js';
+import { newDesign, buildParts, bounds, makeId, liftToFloor, keepLowest, rotOf, hasRot, isRef, partBox, clampParams, resolveMaterials } from './core/model.js';
 import { cutList } from './core/cutlist.js';
 import { buildBom } from './core/bom.js';
 import { buildSteps, buildListing, suggestPrice } from './core/listing.js';
+import { designJoints, annotateSteps } from './core/joints.js';
 import { parseText } from './core/parser.js';
 import { designWithAI, designFromImages, checkApiKey, cleanKey } from './core/ai.js';
 import { addUsage, usageThisMonth } from './core/aiCost.js';
@@ -41,24 +44,89 @@ const AI_PHOTO_COST = '약 200~400원';
 function compute() {
   const template = getTemplate(design.templateId);
   const parts = buildParts(design);
+  const joints = designJoints(design, parts);
   const cut = cutList(parts, settings.priceOverrides);
-  const bom = buildBom(design, parts, cut, template, settings.priceOverrides);
-  const steps = buildSteps(design, template);
+  const bom = buildBom(design, parts, cut, template, settings.priceOverrides, joints);
+  const steps = annotateSteps(buildSteps(design, template), joints);
   const suggested = suggestPrice(bom.total, design.laborHours, design.hourlyRate);
   const price = design.price ?? suggested;
   const listing = buildListing({ design, template, parts, bom, price, weight: bom.weight });
-  derived = { template, parts, cut, bom, steps, suggested, listing, market: MARKET_PRICES[design.templateId], marketNote: MARKET_NOTES[design.templateId] };
-  if (selectedId && !parts.some(p => p.id === selectedId)) selectedId = null;
+  derived = { template, parts, joints, cut, bom, steps, suggested, listing, market: MARKET_PRICES[design.templateId], marketNote: MARKET_NOTES[design.templateId] };
+  // 고른 것이 없어졌으면 선택 해제. 연결부는 묶음 글자가 다시 매겨질 수 있어 연결부 id 로 따라간다
+  if (isJointSel(selectedId)) {
+    const hit = joints.find(j => selJointIds.includes(j.id));
+    selectedId = hit ? `joint:${hit.group}` : null;
+  } else if (selectedId && !parts.some(p => p.id === selectedId)) selectedId = null;
+}
+
+// ---------- 선택 ----------
+// selectedId = 부품 id, 'joint:<묶음 글자>', 또는 null. 3D·도면·목록·표·키보드 모두 select() 를 거친다
+const isJointSel = id => typeof id === 'string' && id.startsWith('joint:');
+let selJointIds = []; // 고른 연결부 묶음의 연결부 id 들
+const jointLetter = () => (isJointSel(selectedId) ? selectedId.slice(6) : null);
+const selectedPart = () => (isJointSel(selectedId) ? null : derived.parts.find(p => p.id === selectedId) || null);
+const groupIds = letter => derived.joints.filter(j => j.group === letter).map(j => j.id);
+const isPhone = () => window.matchMedia('(max-width: 760px)').matches;
+
+// sheet: 폰에서 아래 창을 펼칠지 (기본: 부품을 골랐을 때)
+// reveal: 카드를 보이게 스크롤할지. 목록에서 고르면 목록 자리를 지키려고 스크롤하지 않는다
+// 오른쪽 패널의 입력칸에 커서가 있으면 먼저 확정(blur → change)한다. 폰에서는 손을 떼는 순서가 달라 글이 사라질 수 있어서
+function commitPanelInput() {
+  const a = document.activeElement;
+  if (a && a !== document.body && $('#rightBody')?.contains(a)) a.blur();
+}
+function select(id, { sheet = !!id && !isJointSel(id), reveal = true } = {}) {
+  commitPanelInput();
+  if (isJointSel(id)) {
+    selJointIds = groupIds(id.slice(6));
+    selectedId = selJointIds.length ? id : null;
+  } else {
+    selJointIds = [];
+    selectedId = id && derived.parts.some(p => p.id === id) ? id : null;
+  }
+  renderViewer();
+  renderRightPanel();
+  if (tab === 'drawing') { renderTabs(); markJoint(false); }
+  if (selectedId && sheet && isPhone()) openSheet(true);
+  if (reveal) revealCard();
+}
+
+// 폰 아래 창 펼치기·접기 (손잡이 글자도 같이)
+function openSheet(open) {
+  $('#right').classList.toggle('open', open);
+  $('#sheetHandle').textContent = open ? '부품·치수 ▼' : '부품·치수 ▲';
+}
+
+// 오른쪽 패널(폰은 아래 창) 안에서 카드 윗부분이 안 보이면 카드가 보이게 스크롤한다 (페이지는 그대로)
+function revealCard() {
+  const box = $('#right');
+  const card = box.querySelector('.pc-card, .jc-card');
+  if (!card) return;
+  const pad = ($('#sheetHandle').offsetHeight || 0) + 8;
+  const top = card.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+  if (top < box.scrollTop + pad || top > box.scrollTop + box.clientHeight - 80) box.scrollTop = Math.max(0, top - pad);
+}
+
+// 도면 탭에서 고른 연결부의 표 줄·확대 그림 강조 (scroll 이면 확대 그림으로 스크롤)
+function markJoint(scroll) {
+  document.querySelectorAll('.jt-card.on, .tbl.jt tr.on').forEach(el => el.classList.remove('on'));
+  const g = jointLetter();
+  if (!g) return;
+  document.querySelectorAll(`.tbl.jt tr[data-id="${CSS.escape(g)}"]`).forEach(el => el.classList.add('on'));
+  const card = document.getElementById(`jt-${g}`);
+  if (card) { card.classList.add('on'); if (scroll) card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 }
 
 // ---------- 화면 ----------
 const viewer = new Viewer($('#viewer'), {
-  onSelect: id => { selectedId = id; renderViewer(); renderRightPanel(); },
+  // 3D 에서 누른 부품·연결부 표식 (폰에서는 연결부를 눌러도 아래 창을 펼쳐 카드를 보여 준다)
+  onSelect: id => select(id, { sheet: !!id }),
   onMove: (id, delta) => mutate(() => moveBy(id, delta), { right: true })
 });
 
 function renderViewer(refit = false) {
-  viewer.setParts(derived.parts, selectedId, { refit });
+  viewer.setParts(derived.parts, isJointSel(selectedId) ? null : selectedId, { refit });
+  viewer.setJoints(derived.joints, { show: settings.showJoints !== false, selected: jointLetter() });
   const b = bounds(derived.parts);
   const realCount = derived.parts.filter(p => !isRef(p)).length;
   $('#stats').textContent = realCount
@@ -72,13 +140,28 @@ function renderViewer(refit = false) {
 function renderLeftPanel() {
   $('#left').innerHTML = renderLeft(leftView, { design, designs: store.listDesigns(), links });
 }
+// 뺀 템플릿 부품 [{ id, name }]: 템플릿을 다시 만들어 design.removed 에 있는 것만 (직접 설계는 빼면 지워지므로 없음)
+function removedParts() {
+  const t = derived.template;
+  const gone = new Set(design.removed || []);
+  if (!t || t.id === 'custom' || !gone.size) return [];
+  return t.build(clampParams(t, design.params).params, resolveMaterials(t, design))
+    .filter(p => gone.has(p.id))
+    .map(p => ({ id: p.id, name: (design.partEdits?.[p.id]?.name || '').trim() || p.name }));
+}
+// 부품 목록에서 사용자가 펼쳐 둔 묶음 이름 (다시 그려도 유지)
+const openGroups = new Set();
+const nudgeStep = () => ([1, 10, 50].includes(settings.nudgeStep) ? settings.nudgeStep : 10);
 function renderRightPanel() {
-  const selected = derived.parts.find(p => p.id === selectedId) || null;
-  $('#right').innerHTML = renderRight({ design, template: derived.template, selected, removedCount: (design.removed || []).length });
+  commitPanelInput();
+  $('#rightBody').innerHTML = renderRight({
+    design, template: derived.template, parts: derived.parts, joints: derived.joints, numbers: partNumbers(derived.parts),
+    steps: derived.steps, selectedId, nudgeStep: nudgeStep(), removedParts: removedParts(), openGroups
+  });
 }
 function renderTabs() {
   $('#tabs').innerHTML = TABS.map(([k, l]) => `<button data-act="tab" data-tab="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('');
-  $('#tabBody').innerHTML = renderTab(tab, { design, ...derived });
+  $('#tabBody').innerHTML = renderTab(tab, { design, selectedId, ...derived });
 }
 function renderAll({ refit = false } = {}) {
   renderViewer(refit);
@@ -88,6 +171,7 @@ function renderAll({ refit = false } = {}) {
   const aiOn = !!(settings.useAI && settings.apiKey);
   $('#aiBadge').textContent = aiOn ? 'AI 켜짐' : '무료 모드';
   $('#aiBadge').classList.toggle('on', aiOn);
+  $('#jointsBtn').classList.toggle('on', settings.showJoints !== false);
 }
 
 // ---------- 저장과 되돌리기 ----------
@@ -120,16 +204,38 @@ function undo() {
 }
 
 // mutate: 되돌리기 저장 → 바꾸기 → 다시 계산 → 다시 그리기 → 저장
-function mutate(fn, { right = true, left = false, refit = false, undoable = true } = {}) {
+// 포인터(마우스·손가락)를 누르고 있는 동안 생긴 바꾸기(입력칸에서 나가며 생기는 change)는
+// 화면을 바로 다시 그리지 않고 손을 뗀 뒤에 그린다. 바로 그리면 누르던 버튼이 바뀌어 click 이 사라진다
+let pointerHeld = false;
+let renderDeferred = null;
+function flushDeferred() {
+  const d = renderDeferred;
+  if (!d) return;
+  renderDeferred = null;
+  renderViewer(d.refit);
+  if (d.tabs) renderTabs();
+  if (d.right) renderRightPanel();
+  if (d.left) renderLeftPanel();
+}
+document.addEventListener('pointerdown', () => { pointerHeld = true; }, true);
+for (const ev of ['pointerup', 'pointercancel']) document.addEventListener(ev, () => { pointerHeld = false; if (renderDeferred) setTimeout(flushDeferred, 0); }, true);
+window.addEventListener('blur', () => { pointerHeld = false; if (renderDeferred) setTimeout(flushDeferred, 0); });
+
+function mutate(fn, { right = true, left = false, refit = false, undoable = true, tabs = true } = {}) {
   if (undoable) pushUndo();
   fn();
   delete design.fresh;
   design.updatedAt = Date.now();
   compute();
-  renderViewer(refit);
-  renderTabs();
-  if (right) renderRightPanel();
-  if (left) renderLeftPanel();
+  if (pointerHeld) {
+    const d = renderDeferred || { refit: false, tabs: false, right: false, left: false };
+    renderDeferred = { refit: d.refit || refit, tabs: d.tabs || tabs, right: d.right || right, left: d.left || left };
+  } else {
+    renderViewer(refit);
+    if (tabs) renderTabs();
+    if (right) renderRightPanel();
+    if (left) renderLeftPanel();
+  }
   saveSoon();
 }
 
@@ -161,13 +267,78 @@ function keepBottom(ep, oldSize) {
   keepLowest(ep, { size: oldSize, rot: ep.rot });
 }
 function removeSelected() {
-  if (!selectedId) return;
+  if (!selectedPart()) return;
   const id = selectedId;
   mutate(() => {
     if (findExtra(id)) design.extraParts = design.extraParts.filter(p => p.id !== id);
     else design.removed = [...new Set([...(design.removed || []), id])];
     selectedId = null;
   });
+}
+
+// 고른 부품을 한 축으로 밀기 (한 번에 settings.nudgeStep mm). 바닥 아래로는 못 내려간다 (기울인 부품은 가장 낮은 꼭짓점 기준)
+function nudgeSelected(axis, dir, { undoable = true } = {}) {
+  const p = selectedPart();
+  if (!p) return;
+  const delta = [0, 0, 0];
+  delta[axis] = dir * nudgeStep();
+  if (axis === 1 && delta[1] < 0) {
+    delta[1] = Math.min(0, Math.max(delta[1], -partBox(p).min[1]));
+    if (!delta[1]) { toast('바닥보다 아래로는 못 내려가요.'); return; }
+  }
+  mutate(() => moveBy(p.id, delta), { undoable });
+}
+
+// 고른 부품을 추가 부품으로 복사해 오른쪽(x) 50mm 옆에 놓는다. 템플릿 메모는 같이, 바꾼 이름·내 메모는 빼고
+function duplicateSelected() {
+  const p = selectedPart();
+  if (!p) return;
+  if (isRef(p)) { toast('참고용 부품은 복사할 수 없어요.'); return; }
+  const { extra, origName, userNote, ...rest } = p;
+  // 모든 부품의 오른쪽 끝 너머에 놓아 두 번 복사해도 겹치지 않게
+  const right = bounds(derived.parts).max[0];
+  const half = (partBox(p).max[0] - partBox(p).min[0]) / 2;
+  const copy = { ...structuredClone(rest), id: makeId('p'), name: `${p.name} (복사)`.slice(0, 40), pos: [right + half + 50, p.pos[1], p.pos[2]] };
+  mutate(() => { design.extraParts = [...(design.extraParts || []), copy]; });
+  select(copy.id);
+  toast('복사한 부품을 오른쪽 옆에 놓았어요. 밀기 버튼이나 끌기로 자리를 잡아 주세요.');
+}
+
+// 추가 부품의 자재를 바꾸면 각재·파이프는 단면, 판재는 두께를 새 자재에 맞춘다 (가장 긴 쪽과 놓인 방향은 그대로)
+function fitToMaterial(ep) {
+  const m = MATERIALS[ep.material];
+  if (!m || FIXED_SHAPES.has(ep.shape) || ep.shape === 'notched') return;
+  const order = [0, 1, 2].sort((a, b) => ep.size[a] - ep.size[b]); // 짧은 쪽부터
+  if (isLinear(ep.material) && m.section) { ep.size[order[0]] = m.section[0]; ep.size[order[1]] = m.section[1]; }
+  else if (m.kind === 'sheet' && m.thickness) ep.size[order[0]] = m.thickness;
+}
+
+// 부품 이름·메모 고치기 (design.partEdits[id]). 빈 값이나 원래 이름과 같은 이름은 지운다
+function setPartEdit(id, key, value) {
+  const part = derived.parts.find(p => p.id === id);
+  if (!part) return;
+  design.partEdits = design.partEdits && typeof design.partEdits === 'object' ? design.partEdits : {};
+  const e = { ...design.partEdits[id] };
+  const v = String(value ?? '').trim().slice(0, key === 'name' ? 40 : 200);
+  if (!v || (key === 'name' && v === part.origName)) delete e[key];
+  else e[key] = v;
+  if (Object.keys(e).length) design.partEdits[id] = e;
+  else delete design.partEdits[id];
+}
+
+// 고른 연결부 묶음의 수정 (design.jointEdits). fn(기존 수정) 이 새 수정을 돌려준다 (null 이면 지움)
+function editSelectedJoints(fn) {
+  const ids = groupIds(jointLetter());
+  if (!ids.length) return false;
+  mutate(() => {
+    design.jointEdits = design.jointEdits && typeof design.jointEdits === 'object' ? design.jointEdits : {};
+    for (const id of ids) {
+      const next = fn({ ...design.jointEdits[id] });
+      if (next) design.jointEdits[id] = next;
+      else delete design.jointEdits[id];
+    }
+  });
+  return true;
 }
 
 // ---------- 말로 설계 ----------
@@ -441,11 +612,17 @@ $('#settingsBtn').addEventListener('click', () => openSettings());
 $('#aiBadge').addEventListener('click', () => openSettings());
 $('#visionBtn').addEventListener('click', () => vision.open());
 $('#undoBtn').addEventListener('click', undo);
-document.querySelectorAll('.view-btns button').forEach(b => b.addEventListener('click', () => viewer.setView(b.dataset.view)));
+document.querySelectorAll('.view-btns button[data-view]').forEach(b => b.addEventListener('click', () => viewer.setView(b.dataset.view)));
 
 document.addEventListener('click', async e => {
+  // 부품 목록 묶음을 사용자가 직접 펼치거나 접으면 기억한다 (자동으로 펼쳐진 것은 기억하지 않음)
+  const sum = e.target.closest('.pl-group > summary');
+  if (sum) {
+    const d = sum.parentElement;
+    setTimeout(() => { if (d.open) openGroups.add(d.dataset.name); else openGroups.delete(d.dataset.name); }, 0);
+  }
   const t = e.target.closest('[data-act]');
-  if (!t || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'FORM') return;
+  if (!t || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.tagName === 'FORM') return;
   const id = t.dataset.id;
   switch (t.dataset.act) {
     case 'tab': tab = t.dataset.tab; renderTabs(); break;
@@ -507,6 +684,58 @@ document.addEventListener('click', async e => {
     case 'reset-move': mutate(() => { delete design.moved[selectedId]; }); break;
     case 'remove-part': removeSelected(); break;
     case 'restore-parts': mutate(() => { design.removed = []; }); break;
+    case 'restore-part': mutate(() => { design.removed = (design.removed || []).filter(x => x !== id); }); select(id); break;
+    case 'select-part': {
+      const inPanel = !!t.closest('#rightBody');
+      if (!inPanel) { select(id); break; }
+      const box = $('#right');
+      const before = t.getBoundingClientRect().top;
+      select(id, { reveal: false });
+      const row = box.querySelector(`.pl-item[data-id="${CSS.escape(id)}"]`);
+      if (row) box.scrollTop += row.getBoundingClientRect().top - before;
+      break;
+    }
+    case 'nudge': {
+      const axis = Number(t.dataset.axis);
+      const dir = Number(t.dataset.dir);
+      if ([0, 1, 2].includes(axis) && (dir === 1 || dir === -1)) nudgeSelected(axis, dir);
+      break;
+    }
+    case 'nudge-step': {
+      const s = Number(t.dataset.step);
+      if (![1, 10, 50].includes(s)) break;
+      settings = { ...settings, nudgeStep: s };
+      store.saveSettings(settings);
+      renderRightPanel();
+      break;
+    }
+    case 'dup-part': duplicateSelected(); break;
+    case 'joint-hide':
+      if (editSelectedJoints(e => ({ ...e, hidden: true }))) {
+        select(null);
+        toast('이 연결을 숨겼어요. 오른쪽 패널 아래 "숨긴 연결부 다시 보이기"로 되살릴 수 있어요.');
+      }
+      break;
+    case 'joint-reset': editSelectedJoints(() => null); break;
+    case 'joints-unhide':
+      mutate(() => {
+        for (const [jid, e] of Object.entries(design.jointEdits || {})) {
+          if (!e || !(e.hidden || e.type === 'none')) continue;
+          const { hidden, ...rest } = e;
+          if (rest.type === 'none') delete rest.type;
+          if (Object.keys(rest).length) design.jointEdits[jid] = rest;
+          else delete design.jointEdits[jid];
+        }
+      });
+      toast('숨긴 연결부를 다시 보이게 했어요.');
+      break;
+    case 'toggle-joints':
+      settings = { ...settings, showJoints: settings.showJoints === false };
+      store.saveSettings(settings);
+      t.classList.toggle('on', settings.showJoints);
+      renderViewer();
+      break;
+    case 'toggle-sheet': openSheet(!$('#right').classList.contains('open')); break;
     case 'rotate': {
       const ep = findExtra(selectedId);
       if (!ep) break;
@@ -520,10 +749,46 @@ document.addEventListener('click', async e => {
       });
       break;
     }
-    case 'print': window.print(); break;
-    case 'save-svg': {
+    case 'pick-part': select(id); break;
+    case 'pick-joint': {
+      // 풍선·표 줄·부품 카드의 "붙는 곳"·연결부 카드의 "도면에서 보기"(data-show: 도면 탭으로 바꾸고, 폰은 아래 창을 접는다)
+      if (t.dataset.show) { tab = 'drawing'; if (isPhone()) openSheet(false); }
+      select(`joint:${id}`);
+      if (tab === 'drawing') markJoint(true);
+      break;
+    }
+    case 'zoom-drawing': {
       const svg = document.querySelector('.drawing-wrap svg');
-      if (svg) download(`${safeName(design.title)}-도면.svg`, new Blob([svg.outerHTML], { type: 'image/svg+xml' }));
+      if (!svg) break;
+      const wrap = document.createElement('div');
+      wrap.className = 'zoom-overlay';
+      wrap.style.setProperty('--zoom', '160%');
+      wrap.innerHTML = `<div class="zoom-bar"><button data-act="zoom-in">크게</button><button data-act="zoom-out">작게</button><span class="zoom-hint">손가락 두 개로도 확대돼요</span><button data-act="zoom-close">닫기</button></div>`;
+      const copy = svg.cloneNode(true);
+      copy.querySelectorAll('[data-act]').forEach(el => el.removeAttribute('data-act'));
+      wrap.appendChild(copy);
+      document.body.appendChild(wrap);
+      break;
+    }
+    case 'zoom-in': case 'zoom-out': {
+      const wrap = t.closest('.zoom-overlay');
+      const cur = parseInt(wrap.style.getPropertyValue('--zoom'), 10) || 160;
+      wrap.style.setProperty('--zoom', `${Math.max(80, Math.min(400, cur + (t.dataset.act === 'zoom-in' ? 40 : -40)))}%`);
+      break;
+    }
+    case 'zoom-close': t.closest('.zoom-overlay')?.remove(); break;
+    case 'print': {
+      // 인쇄는 누른 부품 강조 없이 (강조·흐림이 종이에 남지 않게)
+      const keep = selectedId;
+      if (keep && tab === 'drawing') { selectedId = null; renderTabs(); }
+      window.print();
+      if (keep && tab === 'drawing') { selectedId = keep; renderTabs(); }
+      break;
+    }
+    case 'save-svg': {
+      const sub = derived.template && derived.template.id !== 'custom' ? derived.template.name : '직접 설계';
+      const svg = renderDrawing(derived.parts, { title: design.title, subtitle: sub, joints: derived.joints, numbers: partNumbers(derived.parts) });
+      if (svg.startsWith('<svg')) download(`${safeName(design.title)}-도면.svg`, new Blob([svg], { type: 'image/svg+xml' }));
       break;
     }
     case 'save-png': download(`${safeName(design.title)}-3D.png`, viewer.snapshot()); break;
@@ -604,17 +869,53 @@ document.addEventListener('change', e => {
   switch (act) {
     case 'param': gesture = false; renderRightPanel(); break;
     case 'material': mutate(() => { design.materials = { ...design.materials, [t.dataset.slot]: t.value }; }); break;
-    case 'check': mutate(() => { design.checked = { ...design.checked, [t.dataset.id]: t.checked }; }, { right: false, undoable: false }); break;
-    case 'part-move': mutate(() => {
-      design.moved ||= {};
-      const cur = design.moved[selectedId] || [0, 0, 0];
-      cur[i] = Number(t.value) || 0;
-      design.moved[selectedId] = cur;
-    }); break;
-    case 'part-pos': {
+    case 'check': mutate(() => { design.checked = { ...design.checked, [t.dataset.id]: t.checked }; }, { right: false, undoable: false, tabs: !String(t.dataset.id).startsWith('cut:') }); break;
+    // 절대 위치(부품 가운데, mm). 추가 부품은 pos 를, 템플릿 부품은 원래 자리에서 옮긴 만큼(moved)을 바꾼다.
+    // 바닥 아래로는 못 내려가게 (기울인 부품은 가장 낮은 꼭짓점 기준)
+    case 'part-abs': {
+      const p = selectedPart();
+      const v = Number(t.value);
+      if (!p || ![0, 1, 2].includes(i)) break;
+      if (t.value.trim() === '' || !Number.isFinite(v)) { renderRightPanel(); break; }
+      const ep = findExtra(p.id);
+      if (ep) mutate(() => { ep.pos[i] = v; liftToFloor(ep); });
+      else mutate(() => {
+        design.moved ||= {};
+        const cur = [0, 1, 2].map(k => Number(design.moved[p.id]?.[k]) || 0);
+        cur[i] = v - (p.pos[i] - cur[i]);
+        const low = partBox(p).min[1] + (i === 1 ? v - p.pos[1] : 0);
+        if (low < 0) cur[1] -= low;
+        design.moved[p.id] = cur;
+      });
+      break;
+    }
+    case 'part-name': if (selectedPart()) mutate(() => setPartEdit(selectedId, 'name', t.value)); break;
+    case 'part-note': if (selectedPart()) mutate(() => setPartEdit(selectedId, 'note', t.value)); break;
+    case 'part-material': {
       const ep = findExtra(selectedId);
-      // 바닥 아래로는 못 내려가게 (기울인 부품은 가장 낮은 꼭짓점 기준)
-      if (ep) mutate(() => { ep.pos[i] = Number(t.value) || 0; liftToFloor(ep); });
+      if (!ep || !Object.hasOwn(MATERIALS, t.value) || MATERIALS[t.value].kind === 'ref') break;
+      mutate(() => {
+        const old = [...ep.size];
+        ep.material = t.value;
+        fitToMaterial(ep);
+        keepBottom(ep, old);
+      });
+      break;
+    }
+    case 'joint-type': {
+      const type = t.value;
+      if (!['screw', 'bolt', 'weld', 'pin', 'glue', 'hinge', 'clamp', 'none'].includes(type)) break;
+      // "없음" 은 붙이지 않음(숨김)
+      if (editSelectedJoints(e => (type === 'none' ? { ...e, type, hidden: true } : { ...e, type })) && type === 'none') {
+        select(null);
+        toast('이 연결을 "없음"으로 바꿔 숨겼어요. 오른쪽 패널 아래 "숨긴 연결부 다시 보이기"로 되살릴 수 있어요.');
+      }
+      break;
+    }
+    case 'joint-qty': {
+      const q = Math.round(Number(t.value));
+      if (!Number.isFinite(q) || t.value.trim() === '') { renderRightPanel(); break; }
+      editSelectedJoints(e => ({ ...e, qty: Math.max(1, Math.min(50, q)) }));
       break;
     }
     case 'part-rot': {
@@ -665,11 +966,23 @@ document.addEventListener('change', e => {
   }
 });
 
+// 키보드 밀기: 화살표 좌우 = 좌우, 위 = 뒤(-z), 아래 = 앞(+z), PageUp·PageDown = 위아래 (밀기 버튼과 같은 단계)
+const NUDGE_KEYS = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [2, -1], ArrowDown: [2, 1], PageUp: [1, 1], PageDown: [1, -1] };
 document.addEventListener('keydown', e => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); undo(); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selectedId) { e.preventDefault(); removeSelected(); }
-  else if (e.key === 'Escape' && !typing) { selectedId = null; renderViewer(); renderRightPanel(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selectedPart()) { e.preventDefault(); removeSelected(); }
+  else if (NUDGE_KEYS[e.key] && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && selectedPart() && !document.querySelector('.zoom-overlay, dialog[open]')) {
+    e.preventDefault();
+    nudgeSelected(...NUDGE_KEYS[e.key], { undoable: !e.repeat });
+  }
+  else if (e.key === 'Escape' && !typing) {
+    const zoom = document.querySelector('.zoom-overlay');
+    if (zoom) { zoom.remove(); return; }
+    // 부품·연결부 선택을 풀고 폰 아래 창도 접는다
+    select(null);
+    openSheet(false);
+  }
 });
 
 // ---------- 시작 ----------
